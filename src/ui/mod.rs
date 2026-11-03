@@ -33,7 +33,7 @@ mod test;
 use cmd::{Cmd, CmdSortKey};
 use keys::{
     builtin::{NavHandler, RangeHandler, Table},
-    map::{resolve, resolve_timeout, KeyMap, Resolution, Target, UserTable},
+    map::{resolve, resolve_timeout, KeyMap, Resolution, RhsItem, Target, UserTable},
     Key,
 };
 pub use history::CommandHistory;
@@ -459,31 +459,54 @@ impl<'ws> Workspace<'ws> {
 
     fn run_user_target(&mut self, target: Target) -> Result<Option<ExitCode>> {
         match target {
-            Target::Keys(keys) => self.replay(&keys),
+            Target::Replay(items) => self.replay(&items),
             Target::Unmapped => Ok(None),
         }
     }
 
-    /// Replays keys as if they were typed, once for each count of the numeric
-    /// prefix. User mappings do not apply to them, only the built-ins.
-    fn replay(&mut self, keys: &[Key]) -> Result<Option<ExitCode>> {
+    /// Replays a mapping as if its keys were typed, once for each count of the
+    /// numeric prefix. User mappings do not apply to the keys, only the
+    /// built-ins. A step that fails drops the rest and shows the error.
+    fn replay(&mut self, items: &[RhsItem]) -> Result<Option<ExitCode>> {
         let times = self.state.get_n_prefix();
         self.state.reset_n_prefix();
         let was_replaying = std::mem::replace(&mut self.state.keymap.replaying, true);
-        let mut result = Ok(None);
+        let mut exit = None;
         'replay: for _ in 0..times {
-            for key in keys {
-                match self.dispatch_key(KeyEvent::new(key.code, key.mods)) {
+            for item in items {
+                let step = match item {
+                    RhsItem::Key(key) => self.dispatch_key(KeyEvent::new(key.code, key.mods)),
+                    RhsItem::Cmd(text) => self.run_mapped_command(text),
+                };
+                match step {
                     Ok(None) => {}
-                    other => {
-                        result = other;
+                    Ok(code) => {
+                        exit = code;
+                        break 'replay;
+                    }
+                    Err(e) => {
+                        self.set_message(MessageLevel::Error, e.to_string());
                         break 'replay;
                     }
                 }
             }
         }
         self.state.keymap.replaying = was_replaying;
-        result
+        Ok(exit)
+    }
+
+    /// Runs the text of a `<Cmd>…<CR>` as a command, without command mode. A
+    /// command that does not parse is an error here, not a dialog, so the
+    /// replay can stop.
+    fn run_mapped_command(&mut self, text: &str) -> Result<Option<ExitCode>> {
+        if keys::command::parse(text).map_err(|e| anyhow!(e))?.is_none() {
+            match cmd::parse(text) {
+                Err(msg) => return Err(anyhow!(msg)),
+                Ok(None) => return Err(anyhow!("Unrecognized command {text}")),
+                Ok(Some(_)) => {}
+            }
+        }
+        self.handle_command(text.to_owned())
     }
 
     fn undo(&mut self) -> Result<()> {
@@ -633,6 +656,19 @@ impl<'ws> Workspace<'ws> {
     fn handle_command(&mut self, cmd_text: String) -> Result<Option<ExitCode>> {
         if cmd_text.is_empty() {
             return Ok(None);
+        }
+        match keys::command::parse(&cmd_text) {
+            Ok(Some(command)) => {
+                if let Err(msg) = self.state.keymap.apply(command) {
+                    self.set_message(MessageLevel::Error, msg);
+                }
+                return Ok(None);
+            }
+            Ok(None) => {}
+            Err(msg) => {
+                self.enter_dialog_mode(Markdown::from_str(&msg));
+                return Ok(None);
+            }
         }
         match cmd::parse(&cmd_text) {
             Ok(Some(Cmd::Edit(path))) => {

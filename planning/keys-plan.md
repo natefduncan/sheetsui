@@ -108,15 +108,18 @@ Replace the `match` in `handle_navigation_input` and
 
 ### 4. Mapping commands and replay
 
-- `Cmd::Map { mode, lhs, rhs }` and `Cmd::Unmap { mode, lhs }` in
-  `src/ui/cmd.rs`, parsed with the notation parser. K12 and K13 checks live
-  here, so the file and the command line share them.
+- The four commands are parsed in `src/ui/keys/command.rs`, not `cmd.rs`:
+  `cmd::parse` returns `&'static str` errors, and a key-notation error needs
+  text built at run time ("`<Nope>` is not a key name"). `handle_command`
+  tries the mapping parser first, then `cmd::parse`. K12 and K13 checks live
+  in the mapping parser, so the file and the command line share them.
+  `KeyMap::apply` does the work and returns the error text, for stage 5.
 - Replay queue: items are keys or `<Cmd>` text. Keys go through the current
   mode's dispatch with user mappings disabled. `<Cmd>` calls
   `handle_command` (finding 8). An error clears the queue.
-- Replay runs inside one `handle_input` call. Check whether the mapping is
-  one undo step (finding 1), through a mode change too, and write the result
-  into the design.
+- Replay runs inside one `handle_input` call. Result of the check (finding 1):
+  a mapping is one undo step, through a mode change and through the timeout
+  path. The design now says so.
 - The numeric prefix repeats the whole replay (K14).
 - Tests: key sequences, `<Cmd>`, the `i`, `v` and `:` mode changes, error
   dropping the rest, no user mapping firing during replay, a `j`/`k` swap

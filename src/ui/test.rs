@@ -6,7 +6,10 @@ use serial_test::serial;
 use crate::book;
 use ironcalc::base::types::Color;
 use crate::ui::cmd::parse_color;
-use crate::ui::keys::{map::Target, parse_keys};
+use crate::ui::keys::{
+    map::{parse_rhs, Target},
+    parse_keys,
+};
 use crate::ui::{Address, ClipboardContents, Modality};
 
 use super::cmd::{parse, Cmd, CmdSortKey};
@@ -572,14 +575,14 @@ fn test_range_select_does_not_take_the_arrow_keys() {
 fn map_nav(ws: &mut Workspace, lhs: &str, rhs: &str) {
     ws.state.keymap.nav.insert(
         parse_keys(lhs).expect("bad lhs"),
-        Target::Keys(parse_keys(rhs).expect("bad rhs")),
+        Target::Replay(parse_rhs(rhs).expect("bad rhs")),
     );
 }
 
 fn map_range(ws: &mut Workspace, lhs: &str, rhs: &str) {
     ws.state.keymap.range.insert(
         parse_keys(lhs).expect("bad lhs"),
-        Target::Keys(parse_keys(rhs).expect("bad rhs")),
+        Target::Replay(parse_rhs(rhs).expect("bad rhs")),
     );
 }
 
@@ -804,6 +807,184 @@ fn test_a_mapping_can_type_into_edit_mode() {
         "hi",
         ws.book.get_current_cell_contents().expect("no contents")
     );
+}
+
+fn last_message(ws: &Workspace) -> Option<String> {
+    ws.state.message.as_ref().map(|m| m.text.clone())
+}
+
+fn type_command(ws: &mut Workspace, text: &str) {
+    script()
+        .char(':')
+        .chars(text)
+        .enter()
+        .run(ws)
+        .expect("Failed to run script");
+}
+
+#[test]
+fn test_nnoremap_from_the_command_line() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    type_command(&mut ws, "nnoremap <Space> jj");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!(None, last_message(&ws));
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 2, ws.book.location.row);
+}
+
+#[test]
+fn test_vnoremap_from_the_command_line() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    type_command(&mut ws, "vnoremap z jj");
+    script().chars("vz").run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
+    assert_eq!(row + 2, ws.book.location.row);
+}
+
+#[test]
+fn test_nunmap_from_the_command_line_hides_a_key() {
+    let mut ws = new_workspace();
+    type_command(&mut ws, "nunmap q");
+    let exit = script().char('q').run(&mut ws).expect("Failed to run script");
+    assert_eq!(None, exit);
+}
+
+#[test]
+fn test_nunmap_of_nothing_shows_a_message() {
+    let mut ws = new_workspace();
+    type_command(&mut ws, "nunmap z");
+    assert_eq!(Some("No mapping for z".to_owned()), last_message(&ws));
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_a_bad_mapping_command_opens_a_dialog() {
+    let mut ws = new_workspace();
+    type_command(&mut ws, "nnoremap <Nope> j");
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+    assert!(ws.state.keymap.nav.is_empty());
+}
+
+#[test]
+fn test_a_digit_mapping_is_refused() {
+    let mut ws = new_workspace();
+    type_command(&mut ws, "nnoremap 5 j");
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+    assert!(ws.state.keymap.nav.is_empty());
+}
+
+#[test]
+fn test_a_mapping_can_run_a_command() {
+    let mut ws = new_workspace();
+    let sheets = ws.book.get_sheet_names().len();
+    map_nav(&mut ws, "<Space>", "<Cmd>new-sheet Extra<CR>");
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(sheets + 1, ws.book.get_sheet_names().len());
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_a_mapped_command_does_not_enter_command_mode_or_the_history() {
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "<Space>", "<Cmd>new-sheet Extra<CR>");
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!(None, ws.state.command_history.older(""));
+}
+
+#[test]
+fn test_keys_and_commands_run_in_order() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "<Space>", "jj<Cmd>new-sheet Extra<CR>");
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 2, ws.book.location.row);
+    assert_eq!(2, ws.book.get_sheet_names().len());
+}
+
+#[test]
+fn test_a_mapped_command_can_quit() {
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "<Space>", "<Cmd>quit<CR>");
+    let exit = script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(ExitCode::SUCCESS), exit);
+}
+
+#[test]
+fn test_an_unknown_command_drops_the_rest_and_shows_the_error() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "<Space>", "j<Cmd>bogus<CR>jj");
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 1, ws.book.location.row, "only the key before the error ran");
+    assert_eq!(Some("Unrecognized command bogus".to_owned()), last_message(&ws));
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_a_command_that_does_not_parse_drops_the_rest() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "<Space>", "<Cmd>insert-rows x<CR>jj");
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row, ws.book.location.row);
+    assert!(last_message(&ws).is_some());
+}
+
+#[test]
+fn test_a_command_that_fails_drops_the_rest_and_does_not_crash() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "<Space>", "<Cmd>export-csv /no/such/dir/out.csv<CR>jj");
+    let result = script().char(' ').run(&mut ws);
+    assert!(result.is_ok(), "a failing mapping must not end the app");
+    assert_eq!(row, ws.book.location.row);
+    assert!(last_message(&ws).is_some());
+}
+
+#[test]
+fn test_replay_can_change_a_mapping() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "<Space>", "<Cmd>nnoremap z jj<CR>");
+    script().chars(" z").run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 2, ws.book.location.row);
+}
+
+fn contents_at(ws: &Workspace, row: usize) -> String {
+    let col = ws.book.location.col;
+    ws.book
+        .get_cell_addr_contents(&Address { sheet: 0, row, col })
+        .expect("no contents")
+}
+
+#[test]
+fn test_a_mapping_is_one_undo_step() {
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "<Space>", "ia<CR>jib<CR>");
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!("a", contents_at(&ws, 1));
+    assert_eq!("b", contents_at(&ws, 2));
+    script().char('u').run(&mut ws).expect("Failed to run script");
+    assert_eq!("", contents_at(&ws, 1), "one undo should undo the whole mapping");
+    assert_eq!("", contents_at(&ws, 2));
+}
+
+#[test]
+fn test_a_timeout_mapping_is_one_undo_step() {
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "<Space>", "ia<CR>jib<CR>");
+    map_nav(&mut ws, "<Space>w", "l");
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    ws.handle_key_timeout().expect("timeout failed");
+    assert_eq!("a", contents_at(&ws, 1));
+    assert_eq!("b", contents_at(&ws, 2));
+    script().char('u').run(&mut ws).expect("Failed to run script");
+    assert_eq!("", contents_at(&ws, 1));
+    assert_eq!("", contents_at(&ws, 2));
 }
 
 macro_rules! assert_help_dialog {

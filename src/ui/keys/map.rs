@@ -2,16 +2,66 @@
 //! built-in table. See `planning/keys-design.md`, "Lookup".
 use std::time::{Duration, Instant};
 
-use super::{builtin::{Lookup, Table}, Key};
+use super::{
+    builtin::{self, Lookup, Table},
+    format_keys, parse_key, Key, KeyError,
+};
 
 /// How long a key that starts a longer user mapping waits for the rest.
 pub const KEY_TIMEOUT: Duration = Duration::from_millis(1000);
 
+/// One step of a mapping's right-hand side.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RhsItem {
+    /// A key, replayed against the built-ins.
+    Key(Key),
+    /// `<Cmd>text<CR>`: a `:` command, run without entering command mode.
+    Cmd(String),
+}
+
+/// Parses a right-hand side: keys, and `<Cmd>…<CR>` commands.
+pub fn parse_rhs(text: &str) -> Result<Vec<RhsItem>, KeyError> {
+    const OPEN: &str = "<cmd>";
+    const CLOSE: &str = "<cr>";
+    let mut items = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        if rest.len() >= OPEN.len() && rest[..OPEN.len()].eq_ignore_ascii_case(OPEN) {
+            let after = &rest[OPEN.len()..];
+            let Some(end) = after.to_ascii_lowercase().find(CLOSE) else {
+                return Err(KeyError("<Cmd> needs a closing <CR>".to_owned()));
+            };
+            let command = after[..end].trim();
+            if command.is_empty() {
+                return Err(KeyError("<Cmd><CR> has no command in it".to_owned()));
+            }
+            items.push(RhsItem::Cmd(command.to_owned()));
+            rest = &after[end + CLOSE.len()..];
+        } else {
+            let (key, used) = parse_key(rest)?;
+            items.push(RhsItem::Key(key));
+            rest = &rest[used..];
+        }
+    }
+    Ok(items)
+}
+
+/// Prints a right-hand side in canonical notation.
+pub fn format_rhs(items: &[RhsItem]) -> String {
+    items
+        .iter()
+        .map(|item| match item {
+            RhsItem::Key(key) => format_keys(&[*key]),
+            RhsItem::Cmd(text) => format!("<Cmd>{text}<CR>"),
+        })
+        .collect()
+}
+
 /// What a user mapping does.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Target {
-    /// Replay these keys, against the built-ins only.
-    Keys(Vec<Key>),
+    /// Replay these steps. Keys mean the built-ins, not user mappings.
+    Replay(Vec<RhsItem>),
     /// `nunmap`: the key does nothing, even if it is a built-in.
     Unmapped,
 }
@@ -139,6 +189,29 @@ pub fn resolve_timeout(user: &UserTable, typed: &[Key]) -> Option<Target> {
     user.longest_match(typed).cloned()
 }
 
+/// The mode a mapping command applies to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MapMode {
+    /// `n`: navigation mode.
+    Navigate,
+    /// `v`: range-select mode.
+    RangeSelect,
+}
+
+/// A parsed `nnoremap`, `vnoremap`, `nunmap` or `vunmap`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MapCommand {
+    Map {
+        mode: MapMode,
+        lhs: Vec<Key>,
+        rhs: Vec<RhsItem>,
+    },
+    Unmap {
+        mode: MapMode,
+        lhs: Vec<Key>,
+    },
+}
+
 /// The user mappings, and the state of a key sequence being typed.
 #[derive(Debug, Default)]
 pub struct KeyMap {
@@ -162,5 +235,63 @@ impl KeyMap {
 
     pub fn clear_timeout(&mut self) {
         self.deadline = None;
+    }
+}
+
+/// Whether the keys are exactly a built-in key in a mode.
+fn is_builtin(mode: MapMode, keys: &[Key]) -> bool {
+    match mode {
+        MapMode::Navigate => matches!(builtin::navigation().lookup(keys), Lookup::Match(_)),
+        MapMode::RangeSelect => matches!(builtin::range_select().lookup(keys), Lookup::Match(_)),
+    }
+}
+
+impl KeyMap {
+    pub fn table(&self, mode: MapMode) -> &UserTable {
+        match mode {
+            MapMode::Navigate => &self.nav,
+            MapMode::RangeSelect => &self.range,
+        }
+    }
+
+    fn table_mut(&mut self, mode: MapMode) -> &mut UserTable {
+        match mode {
+            MapMode::Navigate => &mut self.nav,
+            MapMode::RangeSelect => &mut self.range,
+        }
+    }
+
+    /// Runs a mapping command. An error says why nothing changed.
+    ///
+    /// `unmap` of a user mapping removes it, so the built-in meaning of the
+    /// keys, if any, comes back. `unmap` of a built-in key hides it. `unmap` of
+    /// keys that are neither is an error.
+    pub fn apply(&mut self, command: MapCommand) -> Result<(), String> {
+        match command {
+            MapCommand::Map { mode, lhs, rhs } => {
+                self.table_mut(mode).insert(lhs, Target::Replay(rhs));
+                Ok(())
+            }
+            MapCommand::Unmap { mode, lhs } => {
+                let existing = self
+                    .table(mode)
+                    .mappings()
+                    .iter()
+                    .find(|m| m.lhs == lhs)
+                    .map(|m| m.target.clone());
+                match existing {
+                    Some(Target::Unmapped) => Ok(()),
+                    Some(Target::Replay(_)) => {
+                        self.table_mut(mode).remove(&lhs);
+                        Ok(())
+                    }
+                    None if is_builtin(mode, &lhs) => {
+                        self.table_mut(mode).insert(lhs, Target::Unmapped);
+                        Ok(())
+                    }
+                    None => Err(format!("No mapping for {}", format_keys(&lhs))),
+                }
+            }
+        }
     }
 }

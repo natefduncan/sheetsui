@@ -2,7 +2,11 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{
     builtin::{self, Lookup, NavHandler, RangeHandler},
-    map::{resolve, resolve_timeout, Resolution, Target, UserLookup, UserTable},
+    command,
+    map::{
+        format_rhs, parse_rhs, resolve, resolve_timeout, KeyMap, MapCommand, MapMode, Resolution,
+        RhsItem, Target, UserLookup, UserTable,
+    },
     format_keys, parse_key, parse_keys, Key,
 };
 
@@ -365,7 +369,7 @@ fn keys(text: &str) -> Vec<Key> {
 }
 
 fn replay(text: &str) -> Target {
-    Target::Keys(keys(text))
+    Target::Replay(parse_rhs(text).unwrap_or_else(|e| panic!("{text:?}: {e}")))
 }
 
 fn user_table(mappings: &[(&str, &str)]) -> UserTable {
@@ -505,4 +509,208 @@ fn the_timeout_runs_the_longest_mapping_and_drops_nothing_else_it_cannot_run() {
     let user = user_table(&[("gt", "j"), ("gtt", "jj")]);
     assert_eq!(Some(replay("j")), resolve_timeout(&user, &keys("gt")));
     assert_eq!(None, resolve_timeout(&user, &keys("g")));
+}
+
+fn rk(text: &str) -> RhsItem {
+    RhsItem::Key(one(text))
+}
+
+#[test]
+fn a_right_hand_side_of_keys() {
+    assert_eq!(vec![rk("y"), rk("j"), rk("p")], parse_rhs("yjp").unwrap());
+    assert_eq!(vec![rk("<C-s>"), rk("<Down>")], parse_rhs("<C-s><Down>").unwrap());
+    assert_eq!(Vec::<RhsItem>::new(), parse_rhs("").unwrap());
+}
+
+#[test]
+fn a_right_hand_side_with_a_command() {
+    assert_eq!(
+        vec![RhsItem::Cmd("write".to_owned())],
+        parse_rhs("<Cmd>write<CR>").unwrap()
+    );
+    assert_eq!(
+        vec![RhsItem::Cmd("sort skip 1".to_owned())],
+        parse_rhs("<Cmd>sort skip 1<CR>").unwrap()
+    );
+}
+
+#[test]
+fn keys_and_commands_mix() {
+    assert_eq!(
+        vec![
+            rk("j"),
+            RhsItem::Cmd("write".to_owned()),
+            rk("k"),
+            RhsItem::Cmd("undo".to_owned()),
+        ],
+        parse_rhs("j<Cmd>write<CR>k<Cmd>undo<CR>").unwrap()
+    );
+}
+
+#[test]
+fn cmd_tokens_ignore_case_and_the_text_is_trimmed() {
+    assert_eq!(
+        vec![RhsItem::Cmd("Write Foo.sui".to_owned())],
+        parse_rhs("<cmd>  Write Foo.sui <CR>").unwrap()
+    );
+    assert_eq!(
+        vec![RhsItem::Cmd("write".to_owned())],
+        parse_rhs("<CMD>write<cr>").unwrap()
+    );
+}
+
+#[test]
+fn a_command_needs_text_and_a_closing_cr() {
+    assert!(parse_rhs("<Cmd>write").unwrap_err().to_string().contains("closing <CR>"));
+    assert!(parse_rhs("<Cmd><CR>").unwrap_err().to_string().contains("no command"));
+    assert!(parse_rhs("<Cmd>   <CR>").is_err());
+    assert!(parse_rhs("j<Nope>").is_err());
+}
+
+#[test]
+fn a_right_hand_side_prints_back() {
+    for text in ["yj", "<Space><C-s>", "<Cmd>sort skip 1<CR>", "j<Cmd>write<CR>k"] {
+        assert_eq!(text, format_rhs(&parse_rhs(text).unwrap()));
+    }
+}
+
+fn parsed(text: &str) -> MapCommand {
+    command::parse(text)
+        .unwrap_or_else(|e| panic!("{text:?}: {e}"))
+        .unwrap_or_else(|| panic!("{text:?} is not a mapping command"))
+}
+
+fn command_error(text: &str) -> String {
+    command::parse(text).expect_err(text)
+}
+
+#[test]
+fn the_four_commands_parse() {
+    assert_eq!(
+        MapCommand::Map {
+            mode: MapMode::Navigate,
+            lhs: keys("<Space>c"),
+            rhs: parse_rhs("yj").unwrap(),
+        },
+        parsed("nnoremap <Space>c yj")
+    );
+    assert_eq!(
+        MapCommand::Map {
+            mode: MapMode::RangeSelect,
+            lhs: keys("<Space>s"),
+            rhs: parse_rhs("<Cmd>sort<CR>").unwrap(),
+        },
+        parsed("vnoremap <Space>s <Cmd>sort<CR>")
+    );
+    assert_eq!(
+        MapCommand::Unmap { mode: MapMode::Navigate, lhs: keys("q") },
+        parsed("nunmap q")
+    );
+    assert_eq!(
+        MapCommand::Unmap { mode: MapMode::RangeSelect, lhs: keys("<C-n>") },
+        parsed("vunmap <C-n>")
+    );
+}
+
+#[test]
+fn other_commands_are_not_mapping_commands() {
+    for text in ["write foo", "quit", "new-sheet x", "nnoremapx a b", "noremap a b", "nmap", ""] {
+        assert_eq!(Ok(None), command::parse(text), "{text:?}");
+    }
+}
+
+#[test]
+fn whitespace_around_a_mapping_command_is_forgiven() {
+    let expected = parsed("nnoremap x j");
+    assert_eq!(expected, parsed("  nnoremap   x    j  "));
+    assert_eq!(expected, parsed("nnoremap\tx\tj"));
+}
+
+#[test]
+fn a_right_hand_side_keeps_its_inner_spaces() {
+    let cmd = parsed("nnoremap x <Cmd>sort skip 1<CR>");
+    let MapCommand::Map { rhs, .. } = cmd else { panic!("not a map") };
+    assert_eq!(vec![RhsItem::Cmd("sort skip 1".to_owned())], rhs);
+}
+
+#[test]
+fn a_hash_in_a_mapping_is_a_key() {
+    let cmd = parsed("nnoremap <Space>h #");
+    let MapCommand::Map { rhs, .. } = cmd else { panic!("not a map") };
+    assert_eq!(vec![rk("#")], rhs);
+}
+
+#[test]
+fn a_mapping_command_needs_its_arguments() {
+    assert!(command_error("nnoremap").contains("Usage"));
+    assert!(command_error("nnoremap x").contains("Usage"));
+    assert!(command_error("nunmap").contains("Usage"));
+    assert!(command_error("nunmap x y").contains("Usage"));
+}
+
+#[test]
+fn bad_notation_names_the_command_and_the_problem() {
+    let e = command_error("nnoremap <Nope> j");
+    assert!(e.contains("nnoremap") && e.contains("not a key name"), "{e}");
+    let e = command_error("nnoremap x <Cmd>write");
+    assert!(e.contains("closing <CR>"), "{e}");
+    let e = command_error("vunmap <C-S-x>");
+    assert!(e.contains("terminal cannot report"), "{e}");
+}
+
+#[test]
+fn a_mapping_cannot_start_with_a_digit_or_esc() {
+    for text in ["nnoremap 1 j", "nnoremap 0j k", "nunmap 5", "vnoremap 9 j"] {
+        let e = command_error(text);
+        assert!(e.contains("digits are the numeric prefix"), "{text}: {e}");
+    }
+    for text in ["nnoremap <Esc> j", "nnoremap <Esc>x j", "nunmap <Esc>"] {
+        let e = command_error(text);
+        assert!(e.contains("<Esc> cannot start a mapping"), "{text}: {e}");
+    }
+    // A digit later in the keys is fine.
+    assert!(command::parse("nnoremap g1 j").is_ok());
+    // And a digit on the right is fine.
+    assert!(command::parse("nnoremap x 3j").is_ok());
+}
+
+#[test]
+fn apply_maps_and_replaces() {
+    let mut map = KeyMap::default();
+    map.apply(parsed("nnoremap x j")).unwrap();
+    map.apply(parsed("nnoremap x k")).unwrap();
+    map.apply(parsed("vnoremap x l")).unwrap();
+    assert_eq!(1, map.nav.mappings().len());
+    assert_eq!(replay("k"), map.nav.mappings()[0].target);
+    assert_eq!(replay("l"), map.range.mappings()[0].target);
+}
+
+#[test]
+fn apply_unmap_removes_a_user_mapping_and_the_built_in_returns() {
+    let mut map = KeyMap::default();
+    map.apply(parsed("nnoremap j k")).unwrap();
+    map.apply(parsed("nunmap j")).unwrap();
+    assert!(map.nav.is_empty());
+}
+
+#[test]
+fn apply_unmap_hides_a_built_in() {
+    let mut map = KeyMap::default();
+    map.apply(parsed("nunmap q")).unwrap();
+    assert_eq!(Target::Unmapped, map.nav.mappings()[0].target);
+    // Again: already hidden, not an error, and still hidden.
+    map.apply(parsed("nunmap q")).unwrap();
+    assert_eq!(Target::Unmapped, map.nav.mappings()[0].target);
+    // The range mode table is separate: `q` is not a key there.
+    assert!(map.apply(parsed("vunmap q")).is_err());
+}
+
+#[test]
+fn apply_unmap_of_nothing_is_an_error() {
+    let mut map = KeyMap::default();
+    let e = map.apply(parsed("nunmap z")).unwrap_err();
+    assert_eq!("No mapping for z", e);
+    // The start of a built-in sequence is not a built-in key.
+    assert!(map.apply(parsed("nunmap g")).is_err());
+    assert!(map.nav.is_empty());
 }

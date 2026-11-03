@@ -39,7 +39,7 @@ There is no way to change a key without editing the source.
 | K7 | `:nmap` and `:vmap` list the user's mappings and the load warnings in a dialog, as `:theme` does for themes. |
 | K8 | The key lists in the help are generated from the key tables. The docs mark where a list goes with `{{keys:<group>}}`. A "Your mappings" section lists user mappings. |
 | K9 | Vim key notation. One `Key { code, mods }` normalizer is used by the file parser and by live input. Shift is folded into a character key. `<C-S-x>` is rejected with a warning. The kitty keyboard protocol is not enabled. |
-| K10 | Replay goes through the live input pipeline. User mappings apply only to the keys the user typed, not to replayed ones. An error drops the rest of the sequence. |
+| K10 | Replay goes through the live input pipeline. User mappings apply only to the keys the user typed, not to replayed ones. An error drops the rest of the sequence. A mapping is one undo step. |
 | K11 | Lookup is two-tier: user mappings first, then the built-ins. A user mapping that matches or is a prefix of the typed keys wins. Mapping `g` shadows `gg`; `nnoremap gg gg` restores it. |
 | K12 | *(Default chosen.)* A left-hand side cannot start with a digit `0`–`9`: digits are the numeric prefix. The line is skipped with a warning. |
 | K13 | *(Default chosen.)* `<Esc>` cannot be the first key of a left-hand side. It stays "cancel pending keys and clear the numeric prefix". |
@@ -59,8 +59,6 @@ Compared with full vim, version 1 leaves out:
 - `<C-S-x>` and any key a terminal cannot report without the kitty protocol.
   The notation parses, so a later opt-in changes no files.
 - Mouse mappings.
-- One undo step per mapping, unless stage 4 finds it comes for free
-  (see Findings in the plan).
 
 ## Key notation
 
@@ -105,7 +103,11 @@ vmap                     list range-select mappings
   right-hand side is the rest of the line.
 - A right-hand side is a sequence of keys and `<Cmd>…<CR>` tokens.
   `<Cmd>` text runs up to the next `<CR>`.
-- A `unmap` of a key that has no mapping and is not a built-in is a warning.
+- `unmap` of a user mapping removes it, and the built-in meaning of those keys,
+  if any, comes back. `unmap` of a built-in key hides it, and a second
+  `unmap` of it changes nothing. `unmap` of keys that are neither is a
+  warning, "No mapping for <keys>". Hiding a built-in is how `nunmap q`
+  works.
 - A later mapping of the same left-hand side replaces the earlier one.
 - Comments are whole lines only. Blank lines and lines starting with `#` are
   ignored. A `#` anywhere else is a literal key, so `nnoremap <Space>h #`
@@ -174,7 +176,12 @@ through the same dispatch a typed key uses:
   were entered, but never enters command mode and never goes into the
   command history.
 - If a replayed key or command fails, the rest of the sequence is dropped and
-  the error shows on the message line.
+  the error shows on the message line. A command that does not parse, is
+  unknown, or fails when it runs all count, and none of them end the app. A
+  command typed in command mode keeps its dialogs, as before.
+- The whole replay runs inside the one key that started it, so it is one undo
+  step, even across a mode change. A mapping that waited out the timeout is
+  one step too.
 - A mapping that ends in edit mode leaves you in edit mode.
 
 The numeric prefix applies to the whole replay (K14).
