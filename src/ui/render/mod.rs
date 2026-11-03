@@ -11,6 +11,7 @@ use crate::ui::theme::Slot;
 
 pub mod viewport;
 pub use viewport::Viewport;
+pub mod cell_class;
 pub mod dialog;
 pub mod markdown;
 

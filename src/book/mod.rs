@@ -12,7 +12,8 @@ use anyhow::{anyhow, Result};
 use ironcalc::{
     base::{
         expressions::types::Area,
-        types::{SheetData, Style, Worksheet},
+        cell::CellValue,
+        types::{CellType, SheetData, Style, Worksheet},
         worksheet::WorksheetDimension,
         Model, UserModel,
     },
@@ -589,6 +590,25 @@ impl Book {
         self
             .model
             .get_cell_style(cell.sheet, cell.row as i32, cell.col as i32).ok()
+    }
+
+    /// The value, type and number format of a cell, for picking its color.
+    pub fn get_cell_class_inputs(
+        &self,
+        Address { sheet, row, col }: &Address,
+    ) -> Option<(CellValue, CellType, String)> {
+        let model = self.model.get_model();
+        let value = model
+            .get_cell_value_by_index(*sheet, *row as i32, *col as i32)
+            .ok()?;
+        let ty = model
+            .get_cell_type(*sheet, *row as i32, *col as i32)
+            .ok()?;
+        let num_fmt = model
+            .get_style_for_cell(*sheet, *row as i32, *col as i32)
+            .ok()?
+            .num_fmt;
+        Some((value, ty, num_fmt))
     }
 
     /// Set the cell style

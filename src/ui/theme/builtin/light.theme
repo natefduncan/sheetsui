@@ -6,3 +6,9 @@ style cursor       fg black    bg #FFE08A
 style selection    fg black    bg #A8D0F0
 style dialog       fg black    bg #EEEEEE
 style heading      fg blue
+style cell.number   fg #0B5394
+style cell.string   fg #274E13
+style cell.boolean  fg #7F6000
+style cell.date     fg #351C75
+style cell.negative fg #A61C00
+style cell.error    fg #CC0000  bold true

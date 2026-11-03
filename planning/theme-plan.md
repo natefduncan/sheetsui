@@ -201,6 +201,9 @@ drawn on a `TestBackend`, with one known cell of each widget checked.
    - `is_date_format(fmt)`: false for `general` (case-insensitive). Otherwise
      run IronCalc's `formatter::parser::Parser::new(fmt)`, `.parse()`, then
      `parts.iter().any(ParsePart::is_date)` (D17).
+   - Named ANSI fills have no exact RGB, so `cell_style` uses standard VGA
+     values for them. A fill with no RGB (`Reset`, `Indexed`) keeps the `cell`
+     slot's fg.
    - `contrast_fg(r, g, b) -> Color`: relative luminance
      `0.2126 R + 0.7152 G + 0.0722 B` on 0–255. Above 140 gives `Black`, else `White`.
    - `cell_style(theme, file_font: Option<Color>, file_fill: Option<Color>, class, in_selection, is_cursor) -> Style`:
@@ -217,6 +220,8 @@ drawn on a `TestBackend`, with one known cell of each widget checked.
    cursor overlays. Date formats: `yyyy-mm-dd`, `m/d/yy`, `h:mm:ss`,
    `"day "0`, `[Red]0.00`, `General`, `0.00`, `#,##0`. Check by eye on
    `examples/test.xlsx`.
+
+Stage 4 gives `light` the `cell.*` type colors. `default` leaves them unset.
 
 ### Stage 5: Palettes and docs
 

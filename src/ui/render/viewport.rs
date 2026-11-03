@@ -2,12 +2,15 @@ use anyhow::Result;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Rect},
-    style::{Style, Stylize},
+    style::Stylize,
     text::{Line, Text},
     widgets::{Block, Cell, Row, StatefulWidget, Table, Widget},
 };
 
-use super::{Address, Book, RangeSelection};
+use super::{
+    cell_class::{cell_style, classify},
+    Address, Book, RangeSelection,
+};
 use crate::{
     book,
     ui::theme::{color::parse_workbook_color, Slot, Theme},
@@ -224,30 +227,34 @@ impl<'ws> Viewport<'ws> {
         cell: Cell<'widget>,
     ) -> Cell<'widget> {
         let workbook_theme = &self.book.model.get_model().workbook.theme;
-        let base = self.theme.get(Slot::Cell);
         let file_color = |color: &ironcalc::base::types::Color| {
             style_color_hex(color, workbook_theme).and_then(|hex| parse_workbook_color(&hex))
         };
-        let colors = Style {
-            fg: file_color(&style.font.color).or(base.fg),
-            bg: file_color(&style.fill.color).or(base.bg),
-            ..Style::default()
+        let addr = Address {
+            sheet: self.book.location.sheet,
+            row: ri,
+            col: ci,
         };
-        // NOTE: while a range is being selected, cells outside it get no colors.
-        // Stage 4 of the theme work fixes this.
-        let mut style = Style::default();
-        if let Some((start, end)) = &self.range_selection.and_then(|r| r.get_range()) {
-            if ri >= start.row && ri <= end.row && ci >= start.col && ci <= end.col {
-                // This is a selected range
-                style = self.theme.get(Slot::Selection);
+        let class = match self.book.get_cell_class_inputs(&addr) {
+            Some((value, ty, num_fmt)) => classify(&value, ty, &num_fmt),
+            None => Slot::Cell,
+        };
+        let in_selection = match self.range_selection.and_then(|r| r.get_range()) {
+            Some((start, end)) => {
+                ri >= start.row && ri <= end.row && ci >= start.col && ci <= end.col
             }
-        } else {
-            style = base.patch(colors);
-        }
+            None => false,
+        };
+        let is_cursor = self.book.location.row == ri && self.book.location.col == ci;
         // TODO(zaphar): Support ironcalc style options
-        if self.book.location.row == ri && self.book.location.col == ci {
-            style = style.patch(self.theme.get(Slot::Cursor));
-        }
+        let style = cell_style(
+            self.theme,
+            file_color(&style.font.color),
+            file_color(&style.fill.color),
+            class,
+            in_selection,
+            is_cursor,
+        );
         cell.style(style)
     }
 }

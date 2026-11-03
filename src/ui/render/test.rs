@@ -337,3 +337,49 @@ fn test_edit_slot_survives_a_new_text_area() {
     assert_eq!(rgb(7), buf[(3, hy)].fg);
     assert_eq!(rgb(1), buf[(2, hy)].fg);
 }
+
+#[test]
+fn test_cells_outside_a_range_selection_keep_their_colors() {
+    use ratatui::{backend::TestBackend, widgets::StatefulWidget, Terminal};
+
+    use crate::ui::theme::{parse, Slot, Theme};
+
+    let mut book = Book::from_model(
+        Model::new_empty("test", "en", "America/New_York", "en").expect("Failed to make model"),
+    );
+    let at = |row, col| Address { sheet: 0, row, col };
+    book.update_cell(&at(3, 2), "-4").expect("set B3");
+    book.update_cell(&at(3, 3), "text").expect("set C3");
+    book.evaluate();
+    let (theme, warnings) = parse(
+        "style cell fg white bg #101010\n\
+         style cell.negative fg red\n\
+         style cell.string fg green\n\
+         style selection fg black bg lightblue\n",
+        &Theme::blank("t"),
+    );
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let range = crate::ui::RangeSelection {
+        start: Some(at(5, 2)),
+        end: Some(at(6, 3)),
+        ..Default::default()
+    };
+    let width = book.get_col_size(1).expect("col size") as u16;
+    let viewport = Viewport::new(&book, Some(&range), &theme).with_selected(at(1, 1));
+    let mut term = Terminal::new(TestBackend::new(5 + width * 6, 10)).expect("terminal");
+    term.draw(|f| {
+        let mut state = ViewportState::default();
+        viewport.render(f.area(), f.buffer_mut(), &mut state);
+    })
+    .expect("draw");
+    let buf = term.backend().buffer();
+    let cell = |row: u16, col: u16| &buf[(5 + width * (col - 1), row)];
+    // Outside the range: type colors and the cell slot survive.
+    assert_eq!(Color::Red, cell(3, 2).fg);
+    assert_eq!(Color::Green, cell(3, 3).fg);
+    assert_eq!(Color::Rgb(16, 16, 16), cell(3, 2).bg);
+    assert_eq!(theme.get(Slot::Cell).bg, Some(cell(4, 4).bg));
+    // Inside the range: the selection colors.
+    assert_eq!(Color::LightBlue, cell(5, 2).bg);
+    assert_eq!(Color::Black, cell(6, 3).fg);
+}
