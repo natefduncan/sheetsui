@@ -184,7 +184,8 @@ src/ui/render/cell_class.rs   classify, contrast_fg, cell_style   (stage 4)
 Apply `border`, `title`, `tab`, `tab.active`, `status`, `command`, `edit`,
 `hint` and `dialog.border` per the widget table. `info` and `error` are
 already used by the message line. All default unset except `tab.active`, so
-the look does not change. Test: a theme setting a distinct fg per slot,
+the look does not change. `Workspace::set_theme` installs a theme and restyles
+the existing text area, so `:theme` takes effect at once. Test: a theme setting a distinct fg per slot,
 drawn on a `TestBackend`, with one known cell of each widget checked.
 
 ### Stage 4: Cell types

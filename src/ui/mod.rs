@@ -29,7 +29,7 @@ mod test;
 
 use cmd::{Cmd, CmdSortKey};
 pub use history::CommandHistory;
-use theme::{lookup, parse::Warning, Theme};
+use theme::{lookup, parse::Warning, Slot, Theme};
 use render::{markdown::Markdown, viewport::ViewportState};
 
 /// Default file name used when creating a new empty workbook.
@@ -242,7 +242,7 @@ impl<'ws> Workspace<'ws> {
             book,
             name,
             state: AppState::default(),
-            text_area: reset_text_area("".to_owned()),
+            text_area: reset_text_area("".to_owned(), &Theme::default()),
         };
         ws.handle_movement_change();
         ws
@@ -942,7 +942,7 @@ impl<'ws> Workspace<'ws> {
                 }
                 KeyCode::Char('s') if key.modifiers != KeyModifiers::CONTROL => {
                     self.book.clear_current_cell()?;
-                    self.text_area = reset_text_area(String::new());
+                    self.text_area = reset_text_area(String::new(), &self.state.theme);
                     self.enter_edit_mode();
                 }
                 KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => {
@@ -1220,9 +1220,15 @@ impl<'ws> Workspace<'ws> {
         self.state.message = Some(Message { level, text });
     }
 
+    /// Installs a theme and restyles the text area, which holds its own styles.
+    fn set_theme(&mut self, theme: Theme) {
+        self.state.theme = theme;
+        style_text_area(&mut self.text_area, &self.state.theme);
+    }
+
     /// Applies a loaded theme and reports it on the message line.
     fn apply_theme(&mut self, name: &str, theme: Theme, warnings: Vec<Warning>) {
-        self.state.theme = theme;
+        self.set_theme(theme);
         let (level, text) = match warnings.len() {
             0 => (MessageLevel::Info, format!("theme {name}")),
             1 => (
@@ -1259,7 +1265,7 @@ impl<'ws> Workspace<'ws> {
         self.state.themes_dir = themes_dir;
         let name = flag.or(config.as_deref()).unwrap_or(&theme.name).to_owned();
         if warnings.is_empty() && flag.is_none() && config.is_none() {
-            self.state.theme = theme;
+            self.set_theme(theme);
         } else {
             self.apply_theme(&name, theme, warnings);
         }
@@ -1375,7 +1381,7 @@ impl<'ws> Workspace<'ws> {
             self.book.edit_current_cell(contents)?;
             self.book.evaluate();
         }
-        self.text_area = reset_text_area(self.book.get_current_cell_contents()?);
+        self.text_area = reset_text_area(self.book.get_current_cell_contents()?, &self.state.theme);
         self.state.dirty = false;
         self.state.pop_modality();
         Ok(())
@@ -1386,7 +1392,7 @@ impl<'ws> Workspace<'ws> {
             .book
             .get_current_cell_contents()
             .expect("Unexpected failure getting current cell contents");
-        self.text_area = reset_text_area(contents);
+        self.text_area = reset_text_area(contents, &self.state.theme);
     }
 
     fn save_file(&mut self) -> Result<()> {
@@ -1424,10 +1430,16 @@ fn load_book(path: &Path, locale: &str, tz: &str) -> Result<Book, anyhow::Error>
     Ok(book)
 }
 
-fn reset_text_area<'a>(content: String) -> TextArea<'a> {
+/// Applies the `edit` and `border` slots to the cell edit box.
+fn style_text_area(text_area: &mut TextArea, theme: &Theme) {
+    text_area.set_style(theme.get(Slot::Edit));
+    text_area.set_block(Block::bordered().border_style(theme.get(Slot::Border)));
+}
+
+fn reset_text_area<'a>(content: String, theme: &Theme) -> TextArea<'a> {
     let mut text_area = TextArea::from(content.lines());
     text_area.set_cursor_line_style(Style::default());
     text_area.set_cursor_style(Style::default());
-    text_area.set_block(Block::bordered());
+    style_text_area(&mut text_area, theme);
     text_area
 }

@@ -41,6 +41,8 @@ impl<'ws> Workspace<'ws> {
                         .map(|(idx, name)| format!("{} {}", name, idx))
                         .collect::<Vec<String>>(),
                 )
+                .style(ws.state.theme.get(Slot::Tab))
+                .highlight_style(ws.state.theme.get(Slot::TabActive))
                 .select(Some(ws.book.location.sheet as usize));
                 tabs.render(rect, buf);
             }),
@@ -51,12 +53,16 @@ impl<'ws> Workspace<'ws> {
                 let hint = Paragraph::new(vec![
                     Line::from(""),
                     Line::from("ALT-h to toggle help dialog").centered(),
-                ]);
+                ])
+                .style(ws.state.theme.get(Slot::Hint));
                 hint.render(info_rect, buf);
             }),
             Box::new(move |rect: Rect, buf: &mut Buffer, ws: &mut Self| {
                 let sheet_name = ws.book.get_sheet_name().unwrap_or("Unknown");
-                let table_block = Block::bordered().title_top(sheet_name);
+                let theme = &ws.state.theme;
+                let table_block = Block::bordered()
+                    .border_style(theme.get(Slot::Border))
+                    .title_top(Line::styled(sheet_name, theme.get(Slot::Title)));
                 let viewport = Viewport::new(
                     &ws.book,
                     if ws.state.modality() == &Modality::RangeSelect {
@@ -80,7 +86,9 @@ impl<'ws> Workspace<'ws> {
                     rect,
                     buf,
                     &mut ws.state.command_state,
-                )
+                );
+                // TextPrompt has no style API, so style its rect afterwards.
+                buf.set_style(rect, ws.state.theme.get(Slot::Command));
             }));
         }
         let rects: Vec<Rect> = Vec::from(
@@ -122,12 +130,16 @@ impl<'widget, 'ws: 'widget> Widget for &'widget mut Workspace<'ws> {
                     .with_bottom_title("Y/N");
             popup.render(area, buf);
         } else {
+            let theme = &self.state.theme;
+            let status = theme.get(Slot::Status);
             let mut outer_block = Block::bordered()
-                .title(Line::from(
+                .border_style(theme.get(Slot::Border))
+                .title(Line::styled(
                     self.name
                         .file_name()
                         .map(|p| p.to_string_lossy().to_string())
                         .unwrap_or_else(|| String::from("Unknown")),
+                    theme.get(Slot::Title),
                 ));
             if let Some(m) = &self.state.message {
                 let slot = match m.level {
@@ -140,19 +152,22 @@ impl<'widget, 'ws: 'widget> Widget for &'widget mut Workspace<'ws> {
                 ));
             }
             let outer_block = outer_block
-                .title_bottom(match self.state.modality() {
-                    Modality::Navigate => "navigate",
-                    Modality::CellEdit => "edit",
-                    Modality::Command => "command",
-                    Modality::Dialog => "",
-                    Modality::RangeSelect => "range-copy",
-                    Modality::Quit => "",
-                })
+                .title_bottom(Line::styled(
+                    match self.state.modality() {
+                        Modality::Navigate => "navigate",
+                        Modality::CellEdit => "edit",
+                        Modality::Command => "command",
+                        Modality::Dialog => "",
+                        Modality::RangeSelect => "range-copy",
+                        Modality::Quit => "",
+                    },
+                    status,
+                ))
                 .title_bottom(
-                    Line::from(format!(
-                        "{},{}",
-                        self.book.location.row, self.book.location.col
-                    ))
+                    Line::styled(
+                        format!("{},{}", self.book.location.row, self.book.location.col),
+                        status,
+                    )
                     .right_aligned(),
                 );
 

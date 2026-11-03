@@ -75,7 +75,7 @@ impl<'w> Widget for Dialog<'w> {
         Clear.render(dialog_area, buf);
         let dialog_block = Block::bordered()
             .title_top(Line::styled(self.title, self.theme.get(Slot::Title)))
-            .title_bottom(self.bottom_title)
+            .title_bottom(Line::styled(self.bottom_title, self.theme.get(Slot::Hint)))
             .style(self.theme.get(Slot::Dialog))
             .border_style(self.theme.get(Slot::DialogBorder));
         let dialog = Paragraph::new(self.content.clone())
