@@ -7,6 +7,7 @@ use ratatui::{
 };
 
 use super::*;
+use crate::ui::theme::Slot;
 
 pub mod viewport;
 pub use viewport::Viewport;
@@ -121,13 +122,24 @@ impl<'widget, 'ws: 'widget> Widget for &'widget mut Workspace<'ws> {
                     .with_bottom_title("Y/N");
             popup.render(area, buf);
         } else {
-            let outer_block = Block::bordered()
+            let mut outer_block = Block::bordered()
                 .title(Line::from(
                     self.name
                         .file_name()
                         .map(|p| p.to_string_lossy().to_string())
                         .unwrap_or_else(|| String::from("Unknown")),
-                ))
+                ));
+            if let Some(m) = &self.state.message {
+                let slot = match m.level {
+                    MessageLevel::Info => Slot::Info,
+                    MessageLevel::Error => Slot::Error,
+                };
+                outer_block = outer_block.title_bottom(Line::styled(
+                    format!(" {} ", m.text),
+                    self.state.theme.get(slot),
+                ));
+            }
+            let outer_block = outer_block
                 .title_bottom(match self.state.modality() {
                     Modality::Navigate => "navigate",
                     Modality::CellEdit => "edit",

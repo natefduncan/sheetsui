@@ -1,0 +1,8 @@
+# Dark text on a light background, for light terminals.
+style cell         fg #2E2E2E  bg #FAFAFA
+style header.even  fg black    bg #D0D4DC  bold true  underline true
+style header.odd   fg black    bg #B4B9C4  bold true  underline true
+style cursor       fg black    bg #FFE08A
+style selection    fg black    bg #A8D0F0
+style dialog       fg black    bg #EEEEEE
+style heading      fg blue

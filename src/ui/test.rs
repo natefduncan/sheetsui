@@ -2279,3 +2279,118 @@ fn test_enter_that_ends_an_edit_is_not_typed_into_the_next_edit() {
     run(&mut ws, script().chars("ec").esc().chars("ed").enter());
     assert_eq!(cell(&ws, 1, 1), "abd");
 }
+
+#[test]
+fn test_parse_theme_cmd() {
+    assert_eq!(parse("theme"), Ok(Some(Cmd::Theme(None))));
+    assert_eq!(parse("theme dracula"), Ok(Some(Cmd::Theme(Some("dracula")))));
+    assert!(parse("themes").is_err());
+}
+
+fn temp_config_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("sheetui-ui-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(dir.join("themes")).unwrap();
+    dir
+}
+
+fn message_text(ws: &Workspace) -> Option<String> {
+    ws.state.message.as_ref().map(|m| m.text.clone())
+}
+
+#[test]
+fn test_theme_cmd_message_is_cleared_by_the_next_key() {
+    let mut ws = new_workspace();
+    let before = ws.state.theme.clone();
+    run_command(&mut ws, "theme nonesuch");
+    let msg = ws.state.message.clone().expect("a message");
+    assert_eq!(msg.level, super::MessageLevel::Error);
+    assert!(msg.text.contains("nonesuch"), "{}", msg.text);
+    assert_eq!(before, ws.state.theme, "the current theme stays");
+    run(&mut ws, script().char('j'));
+    assert_eq!(None, ws.state.message);
+}
+
+#[test]
+fn test_theme_cmd_switches_theme() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "theme light");
+    assert_eq!("light", ws.state.theme.name);
+    assert_eq!(Some("theme light".to_owned()), message_text(&ws));
+    assert_eq!(super::MessageLevel::Info, ws.state.message.as_ref().unwrap().level);
+}
+
+#[test]
+fn test_theme_cmd_with_warnings_counts_them() {
+    let mut ws = new_workspace();
+    let dir = temp_config_dir("warn");
+    ws.state.themes_dir = Some(dir.join("themes"));
+    std::fs::write(dir.join("themes/bad.theme"), "style nope fg red\nstyle cell fg nocolor\n").unwrap();
+    run_command(&mut ws, "theme bad");
+    assert_eq!(
+        Some("theme bad: 2 warnings (:theme to list)".to_owned()),
+        message_text(&ws)
+    );
+    assert_eq!(2, ws.state.theme_warnings.len());
+}
+
+#[test]
+fn test_theme_cmd_lists_builtin_and_user_themes() {
+    let mut ws = new_workspace();
+    let dir = temp_config_dir("list");
+    ws.state.themes_dir = Some(dir.join("themes"));
+    std::fs::write(dir.join("themes/mine.theme"), "style cell fg nocolor\n").unwrap();
+    run_command(&mut ws, "theme mine");
+    run_command(&mut ws, "theme");
+    assert_eq!(&Modality::Dialog, ws.state.modality());
+    let text = ws
+        .state
+        .popup
+        .as_ref()
+        .unwrap()
+        .get_text()
+        .lines
+        .iter()
+        .map(|l| l.to_string())
+        .collect::<Vec<_>>()
+        .join("\n");
+    for needle in ["default", "light", "terminal", "mine", "current", "line 1:"] {
+        assert!(text.contains(needle), "{needle} missing from:\n{text}");
+    }
+}
+
+#[test]
+fn test_init_theme_flag_beats_config_and_bad_name_falls_back() {
+    let dir = temp_config_dir("init");
+    std::fs::write(dir.join("config"), "theme terminal\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_theme_from(None, Some(dir.clone()));
+    assert_eq!("terminal", ws.state.theme.name);
+    ws.init_theme_from(Some("light"), Some(dir.clone()));
+    assert_eq!("light", ws.state.theme.name);
+    ws.init_theme_from(Some("nonesuch"), Some(dir.clone()));
+    assert_eq!("default", ws.state.theme.name);
+    assert_eq!(
+        Some("theme nonesuch: 1 warning (:theme to list)".to_owned()),
+        message_text(&ws)
+    );
+    let mut ws = new_workspace();
+    ws.init_theme_from(None, None);
+    assert_eq!("default", ws.state.theme.name);
+    assert_eq!(None, ws.state.message);
+}
+
+#[test]
+fn test_message_is_drawn_on_the_bottom_border() {
+    use ratatui::{backend::TestBackend, Terminal};
+    let mut ws = new_workspace();
+    run_command(&mut ws, "theme light");
+    let mut term = Terminal::new(TestBackend::new(60, 14)).expect("terminal");
+    term.draw(|f| super::render::draw(f, &mut ws)).expect("draw");
+    let buf = term.backend().buffer().clone();
+    let last = buf.area.height - 1;
+    let row: String = (0..buf.area.width).map(|x| buf[(x, last)].symbol().to_owned()).collect();
+    let msg = row.find("theme light").expect("message on the bottom row");
+    let modality = row.find("navigate").expect("modality on the bottom row");
+    assert!(msg < modality, "{row}");
+}

@@ -16,6 +16,7 @@ pub enum Cmd<'a> {
     SelectSheet(&'a str),
     Edit(&'a str),
     Help(Option<&'a str>),
+    Theme(Option<&'a str>),
     ExportCsv(&'a str),
     SystemPaste,
     Sort { skip: usize, keys: Vec<CmdSortKey> },
@@ -63,6 +64,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
     }
     // try consume help command.
     if let Some(cmd) = try_consume_help(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_theme(cursor.clone())? {
         return Ok(Some(cmd));
     }
     // try consume quit command.
@@ -311,6 +315,26 @@ fn try_consume_help<'cmd, 'i: 'cmd>(
     }
     let arg = input.span(0..).trim();
     Ok(Some(Cmd::Help(if arg.is_empty() {
+        None
+    } else {
+        Some(arg)
+    })))
+}
+
+fn try_consume_theme<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "theme";
+
+    if !compare(input.clone(), LONG) {
+        return Ok(None);
+    }
+    input.seek(LONG.len());
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err("Invalid command: Did you mean to type `theme <name>`?");
+    }
+    let arg = input.span(0..).trim();
+    Ok(Some(Cmd::Theme(if arg.is_empty() {
         None
     } else {
         Some(arg)

@@ -29,7 +29,7 @@ mod test;
 
 use cmd::{Cmd, CmdSortKey};
 pub use history::CommandHistory;
-use theme::Theme;
+use theme::{lookup, parse::Warning, Theme};
 use render::{markdown::Markdown, viewport::ViewportState};
 
 /// Default file name used when creating a new empty workbook.
@@ -84,6 +84,21 @@ pub enum ClipboardContents {
     Range(Vec<Vec<String>>),
 }
 
+/// How a message line is styled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MessageLevel {
+    Info,
+    Error,
+}
+
+/// A one-line message, shown in the outer block's bottom title until the next
+/// key press. Only theme feedback uses it for now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Message {
+    pub level: MessageLevel,
+    pub text: String,
+}
+
 #[derive(Debug)]
 pub struct AppState<'ws> {
     pub modality_stack: Vec<Modality>,
@@ -95,6 +110,11 @@ pub struct AppState<'ws> {
     pub range_select: RangeSelection,
     pub dialog_scroll: u16,
     pub theme: Theme,
+    /// Warnings from the last theme load.
+    pub theme_warnings: Vec<Warning>,
+    /// The user themes directory. `None` means there are only built-ins.
+    pub themes_dir: Option<PathBuf>,
+    pub message: Option<Message>,
     dirty: bool,
     popup: Option<Markdown>,
     clipboard: Option<ClipboardContents>,
@@ -112,6 +132,9 @@ impl<'ws> Default for AppState<'ws> {
             range_select: Default::default(),
             dialog_scroll: 0,
             theme: Theme::default(),
+            theme_warnings: Vec::new(),
+            themes_dir: None,
+            message: None,
             dirty: false,
             popup: Default::default(),
             clipboard: Default::default(),
@@ -320,6 +343,7 @@ impl<'ws> Workspace<'ws> {
     /// Handle input in our ui loop.
     pub fn handle_input(&mut self, evt: Event) -> Result<Option<ExitCode>> {
         if let Event::Key(key) = evt {
+            self.state.message = None;
             // Everything one key changes undoes as one action.
             self.book.begin_action();
             let result = match self.state.modality() {
@@ -491,6 +515,13 @@ impl<'ws> Workspace<'ws> {
             }
             Ok(Some(Cmd::Help(maybe_topic))) => {
                 self.enter_dialog_mode(help::to_widget(maybe_topic.unwrap_or(""), &self.state.theme));
+                Ok(None)
+            }
+            Ok(Some(Cmd::Theme(maybe_name))) => {
+                match maybe_name {
+                    Some(name) => self.switch_theme(name),
+                    None => self.enter_dialog_mode(self.theme_listing()),
+                }
                 Ok(None)
             }
             Ok(Some(Cmd::Write(maybe_path))) => {
@@ -1183,6 +1214,80 @@ impl<'ws> Workspace<'ws> {
         self.state.command_history.reset();
         *self.state.command_state.status_mut() = Status::Pending;
         self.state.command_state.focus();
+    }
+
+    fn set_message(&mut self, level: MessageLevel, text: String) {
+        self.state.message = Some(Message { level, text });
+    }
+
+    /// Applies a loaded theme and reports it on the message line.
+    fn apply_theme(&mut self, name: &str, theme: Theme, warnings: Vec<Warning>) {
+        self.state.theme = theme;
+        let (level, text) = match warnings.len() {
+            0 => (MessageLevel::Info, format!("theme {name}")),
+            1 => (
+                MessageLevel::Error,
+                format!("theme {name}: 1 warning (:theme to list)"),
+            ),
+            n => (
+                MessageLevel::Error,
+                format!("theme {name}: {n} warnings (:theme to list)"),
+            ),
+        };
+        self.state.theme_warnings = warnings;
+        self.set_message(level, text);
+    }
+
+    /// `:theme <name>`. An unknown or unreadable theme keeps the current one.
+    fn switch_theme(&mut self, name: &str) {
+        match lookup::load(name, self.state.themes_dir.as_deref()) {
+            Ok((theme, warnings)) => self.apply_theme(name, theme, warnings),
+            Err(msg) => self.set_message(MessageLevel::Error, msg),
+        }
+    }
+
+    /// Chooses the startup theme from the flag, then the config file, then the
+    /// default. Never fails: a bad theme falls back to `default` with a message.
+    pub fn init_theme(&mut self, flag: Option<&str>) {
+        self.init_theme_from(flag, lookup::config_dir());
+    }
+
+    fn init_theme_from(&mut self, flag: Option<&str>, config_dir: Option<PathBuf>) {
+        let config = config_dir.as_deref().and_then(lookup::read_config);
+        let themes_dir = config_dir.map(|d| d.join("themes"));
+        let (theme, warnings) = lookup::resolve(flag, config.as_deref(), themes_dir.as_deref());
+        self.state.themes_dir = themes_dir;
+        let name = flag.or(config.as_deref()).unwrap_or(&theme.name).to_owned();
+        if warnings.is_empty() && flag.is_none() && config.is_none() {
+            self.state.theme = theme;
+        } else {
+            self.apply_theme(&name, theme, warnings);
+        }
+    }
+
+    /// The `:theme` dialog: available themes, then the last load's warnings.
+    fn theme_listing(&self) -> Markdown {
+        let mut text = String::from("# Themes\n\n");
+        for (name, source) in lookup::list(self.state.themes_dir.as_deref()) {
+            let kind = match source {
+                lookup::Source::Builtin => "built-in",
+                lookup::Source::User => "user",
+            };
+            let current = if name == self.state.theme.name { ", current" } else { "" };
+            text.push_str(&format!("* {name} ({kind}{current})\n"));
+        }
+        if !self.state.theme_warnings.is_empty() {
+            text.push_str("\n## Warnings\n\n");
+            for w in &self.state.theme_warnings {
+                if w.line == 0 {
+                    text.push_str(&format!("* {}\n", w.msg));
+                } else {
+                    text.push_str(&format!("* line {}: {}\n", w.line, w.msg));
+                }
+            }
+        }
+        text.push_str("\nType `theme <name>` to switch.\n");
+        Markdown::from_str_themed(&text, &self.state.theme)
     }
 
     fn enter_dialog_mode(&mut self, msg: Markdown) {

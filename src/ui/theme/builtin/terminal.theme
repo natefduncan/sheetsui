@@ -1,0 +1,8 @@
+# Uses only the terminal's own colors. Cursor and selection are reversed.
+style cell         fg terminal  bg terminal
+style header.even  fg terminal  bg terminal  bold true  underline true
+style header.odd   fg terminal  bg terminal  bold true  underline true  dim true
+style cursor       fg terminal  bg terminal  reverse true  bold true
+style selection    fg terminal  bg terminal  reverse true
+style dialog       fg terminal  bg terminal
+style heading      fg terminal

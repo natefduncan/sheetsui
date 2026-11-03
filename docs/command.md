@@ -36,6 +36,7 @@ The currently supported commands are:
 * `select-sheet <name>` Select a sheet by name.
 * `edit <path>` Open a spreadsheet from the given path. Format is auto-detected from the file extension (`.xlsx` → Excel, `.csv` → CSV, everything else → `.sui`). `e` is a shorthand alias for this command.
 * `help [topic]` Display help for a given topic.
+* `theme [name]` Switch to a theme. With no name, lists the built-in and user themes and any warnings from the last theme load.
 * `export-csv <path>` Export the current sheet to a csv file at `<path>`.
 * `quit` Quits the application. `q` is a shorthand alias for this command.
 * `system-paste` Paste from the system clipboard

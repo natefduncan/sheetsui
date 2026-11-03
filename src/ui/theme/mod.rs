@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 use ratatui::style::Style;
 
 pub mod color;
+pub mod lookup;
 pub mod parse;
 
 pub use parse::parse;
