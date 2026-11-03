@@ -22,6 +22,9 @@ use ratatui_textarea::{CursorMove, TextArea};
 mod cmd;
 mod help;
 mod history;
+// Not used until the built-in key table lands; see planning/keys-plan.md.
+#[allow(dead_code)]
+pub mod keys;
 pub mod render;
 pub mod theme;
 #[cfg(test)]
