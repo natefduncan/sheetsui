@@ -152,6 +152,12 @@ When a key arrives in navigation or range-select mode:
 
 `<Esc>` with keys pending clears them and the numeric prefix.
 
+Known simplification: vim, given mappings `a` and `abc` and the keys `ab` then
+`x`, runs `a` and then handles `b` and `x` again. Here the whole pending
+sequence is dropped, and a timeout runs the longest mapping that starts the
+pending keys and drops the rest. Both follow the steps above, and neither
+re-feeds keys.
+
 Step 4 is why a user with no mappings sees no change: with an empty user
 table the lookup goes straight to the built-ins, and `gg` needs no timeout.
 

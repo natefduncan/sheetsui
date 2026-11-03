@@ -5,6 +5,7 @@ use std::fmt;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 pub mod builtin;
+pub mod map;
 
 #[cfg(test)]
 mod test;

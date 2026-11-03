@@ -8,7 +8,7 @@ use std::{
 use crate::book::{self, AddressRange, Book, SortKey};
 
 use anyhow::{anyhow, Result};
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ironcalc::base::expressions::{types::Area, utils::number_to_column};
 use ratatui::{
     buffer::Buffer,
@@ -32,7 +32,8 @@ mod test;
 
 use cmd::{Cmd, CmdSortKey};
 use keys::{
-    builtin::{Lookup, NavHandler, RangeHandler},
+    builtin::{NavHandler, RangeHandler, Table},
+    map::{resolve, resolve_timeout, KeyMap, Resolution, Target, UserTable},
     Key,
 };
 pub use history::CommandHistory;
@@ -115,6 +116,8 @@ pub struct AppState<'ws> {
     pub numeric_prefix: Vec<char>,
     /// Keys typed so far that are the start of a longer key sequence.
     pub pending_keys: Vec<Key>,
+    /// The user's key mappings and the clock on a half-typed sequence.
+    pub keymap: KeyMap,
     pub range_select: RangeSelection,
     pub dialog_scroll: u16,
     pub theme: Theme,
@@ -137,6 +140,7 @@ impl<'ws> Default for AppState<'ws> {
             command_history: Default::default(),
             numeric_prefix: Default::default(),
             pending_keys: Default::default(),
+            keymap: Default::default(),
             range_select: Default::default(),
             dialog_scroll: 0,
             theme: Theme::default(),
@@ -354,18 +358,132 @@ impl<'ws> Workspace<'ws> {
             self.state.message = None;
             // Everything one key changes undoes as one action.
             self.book.begin_action();
-            let result = match self.state.modality() {
-                Modality::Navigate => self.handle_navigation_input(key),
-                Modality::CellEdit => self.handle_edit_input(key),
-                Modality::Command => self.handle_command_input(key),
-                Modality::Dialog => self.handle_dialog_input(key),
-                Modality::RangeSelect => self.handle_range_select_input(key),
-                Modality::Quit => self.handle_quit_dialog(key),
-            };
+            let result = self.dispatch_key(key);
             self.book.end_action();
             return result;
         }
         Ok(None)
+    }
+
+    /// Sends a key to the handler for the current mode.
+    fn dispatch_key(&mut self, key: KeyEvent) -> Result<Option<ExitCode>> {
+        match self.state.modality() {
+            Modality::Navigate => self.handle_navigation_input(key),
+            Modality::CellEdit => self.handle_edit_input(key),
+            Modality::Command => self.handle_command_input(key),
+            Modality::Dialog => self.handle_dialog_input(key),
+            Modality::RangeSelect => self.handle_range_select_input(key),
+            Modality::Quit => self.handle_quit_dialog(key),
+        }
+    }
+
+    /// When the keys typed so far give up waiting for more, if they are
+    /// waiting on a timeout.
+    pub fn key_deadline(&self) -> Option<std::time::Instant> {
+        self.state.keymap.deadline
+    }
+
+    /// The wait for the rest of a key sequence ran out. Runs the longest user
+    /// mapping the pending keys start, or drops them if there is none.
+    pub fn handle_key_timeout(&mut self) -> Result<Option<ExitCode>> {
+        if self.state.keymap.deadline.is_none() {
+            return Ok(None);
+        }
+        let table = match self.state.modality() {
+            Modality::Navigate => Some(&self.state.keymap.nav),
+            Modality::RangeSelect => Some(&self.state.keymap.range),
+            _ => None,
+        };
+        let target = table.and_then(|t| resolve_timeout(t, &self.state.pending_keys));
+        self.finish_keys();
+        let Some(target) = target else {
+            return Ok(None);
+        };
+        self.book.begin_action();
+        let result = self.run_user_target(target);
+        self.book.end_action();
+        result
+    }
+
+    /// The pending keys are used up: run, dropped or cancelled.
+    fn finish_keys(&mut self) {
+        self.state.pending_keys.clear();
+        self.state.keymap.clear_timeout();
+    }
+
+    /// Acts on what the lookup made of the pending keys.
+    fn apply_resolution<H>(
+        &mut self,
+        resolution: Resolution<H>,
+        run: impl FnOnce(&mut Self, H) -> Result<Option<ExitCode>>,
+    ) -> Result<Option<ExitCode>> {
+        match resolution {
+            Resolution::Builtin(handler) => {
+                self.finish_keys();
+                run(self, handler)
+            }
+            Resolution::User(target) => {
+                self.finish_keys();
+                self.run_user_target(target)
+            }
+            Resolution::Wait { timeout } => {
+                if timeout {
+                    self.state.keymap.start_timeout();
+                } else {
+                    self.state.keymap.clear_timeout();
+                }
+                Ok(None)
+            }
+            Resolution::Drop => {
+                self.finish_keys();
+                Ok(None)
+            }
+        }
+    }
+
+    /// Looks up the pending keys in the user mappings for a mode, then in the
+    /// built-in table. A replay skips the user mappings.
+    fn resolve_pending<H: Copy>(
+        &self,
+        user: fn(&KeyMap) -> &UserTable,
+        builtin: &Table<H>,
+    ) -> Resolution<H> {
+        let none = UserTable::default();
+        let user = if self.state.keymap.replaying {
+            &none
+        } else {
+            user(&self.state.keymap)
+        };
+        resolve(user, builtin, &self.state.pending_keys)
+    }
+
+    fn run_user_target(&mut self, target: Target) -> Result<Option<ExitCode>> {
+        match target {
+            Target::Keys(keys) => self.replay(&keys),
+            Target::Unmapped => Ok(None),
+        }
+    }
+
+    /// Replays keys as if they were typed, once for each count of the numeric
+    /// prefix. User mappings do not apply to them, only the built-ins.
+    fn replay(&mut self, keys: &[Key]) -> Result<Option<ExitCode>> {
+        let times = self.state.get_n_prefix();
+        self.state.reset_n_prefix();
+        let was_replaying = std::mem::replace(&mut self.state.keymap.replaying, true);
+        let mut result = Ok(None);
+        'replay: for _ in 0..times {
+            for key in keys {
+                match self.dispatch_key(KeyEvent::new(key.code, key.mods)) {
+                    Ok(None) => {}
+                    other => {
+                        result = other;
+                        break 'replay;
+                    }
+                }
+            }
+        }
+        self.state.keymap.replaying = was_replaying;
+        result
     }
 
     fn undo(&mut self) -> Result<()> {
@@ -685,29 +803,21 @@ impl<'ws> Workspace<'ws> {
         if key == Key::plain(KeyCode::Esc) {
             if !self.state.numeric_prefix.is_empty() || !self.state.pending_keys.is_empty() {
                 self.state.reset_n_prefix();
-                self.state.pending_keys.clear();
+                self.finish_keys();
             } else {
                 self.state.range_select.start = None;
                 self.state.range_select.end = None;
                 self.exit_range_select_mode()?;
             }
+            self.state.keymap.clear_timeout();
             return Ok(None);
         }
         if self.take_numeric_prefix(&key) {
             return Ok(None);
         }
         self.state.pending_keys.push(key);
-        match keys::builtin::range_select().lookup(&self.state.pending_keys) {
-            Lookup::Match(handler) => {
-                self.state.pending_keys.clear();
-                self.run_range_handler(handler)
-            }
-            Lookup::Prefix => Ok(None),
-            Lookup::None => {
-                self.state.pending_keys.clear();
-                Ok(None)
-            }
-        }
+        let resolution = self.resolve_pending(|k| &k.range, keys::builtin::range_select());
+        self.apply_resolution(resolution, Self::run_range_handler)
     }
 
     fn run_range_handler(&mut self, handler: RangeHandler) -> Result<Option<ExitCode>> {
@@ -948,24 +1058,15 @@ impl<'ws> Workspace<'ws> {
         let key = Key::from_event(&key);
         if key == Key::plain(KeyCode::Esc) {
             self.state.reset_n_prefix();
-            self.state.pending_keys.clear();
+            self.finish_keys();
             return Ok(None);
         }
         if self.take_numeric_prefix(&key) {
             return Ok(None);
         }
         self.state.pending_keys.push(key);
-        match keys::builtin::navigation().lookup(&self.state.pending_keys) {
-            Lookup::Match(handler) => {
-                self.state.pending_keys.clear();
-                self.run_nav_handler(handler)
-            }
-            Lookup::Prefix => Ok(None),
-            Lookup::None => {
-                self.state.pending_keys.clear();
-                Ok(None)
-            }
-        }
+        let resolution = self.resolve_pending(|k| &k.nav, keys::builtin::navigation());
+        self.apply_resolution(resolution, Self::run_nav_handler)
     }
 
     fn run_nav_handler(&mut self, handler: NavHandler) -> Result<Option<ExitCode>> {

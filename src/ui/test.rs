@@ -6,6 +6,7 @@ use serial_test::serial;
 use crate::book;
 use ironcalc::base::types::Color;
 use crate::ui::cmd::parse_color;
+use crate::ui::keys::{map::Target, parse_keys};
 use crate::ui::{Address, ClipboardContents, Modality};
 
 use super::cmd::{parse, Cmd, CmdSortKey};
@@ -566,6 +567,243 @@ fn test_range_select_does_not_take_the_arrow_keys() {
         .run(&mut ws)
         .expect("Failed to run script");
     assert_eq!(row, ws.book.location.row);
+}
+
+fn map_nav(ws: &mut Workspace, lhs: &str, rhs: &str) {
+    ws.state.keymap.nav.insert(
+        parse_keys(lhs).expect("bad lhs"),
+        Target::Keys(parse_keys(rhs).expect("bad rhs")),
+    );
+}
+
+fn map_range(ws: &mut Workspace, lhs: &str, rhs: &str) {
+    ws.state.keymap.range.insert(
+        parse_keys(lhs).expect("bad lhs"),
+        Target::Keys(parse_keys(rhs).expect("bad rhs")),
+    );
+}
+
+#[test]
+fn test_user_mapping_runs() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "<Space>", "jj");
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 2, ws.book.location.row);
+    assert!(ws.state.pending_keys.is_empty());
+    assert_eq!(None, ws.key_deadline());
+}
+
+#[test]
+fn test_user_mapping_wins_over_a_built_in() {
+    let mut ws = new_workspace();
+    let (row, col) = (ws.book.location.row, ws.book.location.col);
+    map_nav(&mut ws, "j", "l");
+    script().char('j').run(&mut ws).expect("Failed to run script");
+    assert_eq!((row, col + 1), (ws.book.location.row, ws.book.location.col));
+}
+
+#[test]
+fn test_swapping_two_keys_does_not_loop() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "j", "k");
+    map_nav(&mut ws, "k", "j");
+    script().char('k').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 1, ws.book.location.row);
+    script().char('j').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row, ws.book.location.row);
+}
+
+#[test]
+fn test_replayed_keys_do_not_trigger_user_mappings() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "j", "jj");
+    script().char('j').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 2, ws.book.location.row);
+}
+
+#[test]
+fn test_a_user_prefix_waits_then_runs() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "gt", "jj");
+    script().char('g').run(&mut ws).expect("Failed to run script");
+    assert_eq!(1, ws.state.pending_keys.len());
+    assert!(ws.key_deadline().is_some());
+    script().char('t').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 2, ws.book.location.row);
+    assert!(ws.state.pending_keys.is_empty());
+    assert_eq!(None, ws.key_deadline());
+}
+
+#[test]
+fn test_gg_still_works_next_to_a_user_gt() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "gt", "l");
+    script().chars("jjjgg").run(&mut ws).expect("Failed to run script");
+    assert_eq!(row, ws.book.location.row);
+}
+
+#[test]
+fn test_timeout_runs_a_mapping_that_a_longer_one_starts() {
+    let mut ws = new_workspace();
+    let (row, col) = (ws.book.location.row, ws.book.location.col);
+    map_nav(&mut ws, "<Space>", "j");
+    map_nav(&mut ws, "<Space>w", "l");
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row, ws.book.location.row, "must wait for a possible <Space>w");
+    ws.handle_key_timeout().expect("timeout failed");
+    assert_eq!(row + 1, ws.book.location.row);
+    assert_eq!(col, ws.book.location.col);
+    assert!(ws.state.pending_keys.is_empty());
+    assert_eq!(None, ws.key_deadline());
+}
+
+#[test]
+fn test_the_longer_mapping_wins_when_its_keys_arrive() {
+    let mut ws = new_workspace();
+    let (row, col) = (ws.book.location.row, ws.book.location.col);
+    map_nav(&mut ws, "<Space>", "j");
+    map_nav(&mut ws, "<Space>w", "l");
+    script().chars(" w").run(&mut ws).expect("Failed to run script");
+    assert_eq!((row, col + 1), (ws.book.location.row, ws.book.location.col));
+}
+
+#[test]
+fn test_timeout_with_no_mapping_drops_the_keys() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "gt", "jj");
+    script().char('g').run(&mut ws).expect("Failed to run script");
+    ws.handle_key_timeout().expect("timeout failed");
+    assert!(ws.state.pending_keys.is_empty());
+    assert_eq!(row, ws.book.location.row);
+}
+
+#[test]
+fn test_a_built_in_prefix_never_times_out() {
+    let mut ws = new_workspace();
+    script().char('g').run(&mut ws).expect("Failed to run script");
+    assert_eq!(None, ws.key_deadline());
+    ws.handle_key_timeout().expect("timeout failed");
+    assert_eq!(1, ws.state.pending_keys.len());
+}
+
+#[test]
+fn test_esc_cancels_a_pending_user_prefix() {
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "gt", "jj");
+    script().char('g').esc().run(&mut ws).expect("Failed to run script");
+    assert!(ws.state.pending_keys.is_empty());
+    assert_eq!(None, ws.key_deadline());
+}
+
+#[test]
+fn test_a_key_that_breaks_a_user_prefix_drops_both() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "gt", "jj");
+    script().chars("gx").run(&mut ws).expect("Failed to run script");
+    assert!(ws.state.pending_keys.is_empty());
+    assert_eq!(None, ws.key_deadline());
+    assert_eq!(row, ws.book.location.row);
+}
+
+#[test]
+fn test_mapping_g_shadows_gg_and_a_gg_mapping_restores_it() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "g", "jj");
+    script().chars("gg").run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 4, ws.book.location.row, "each g is the mapping");
+
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "g", "jj");
+    map_nav(&mut ws, "gg", "gg");
+    script().chars("jjjgg").run(&mut ws).expect("Failed to run script");
+    assert_eq!(row, ws.book.location.row, "gg is back");
+}
+
+#[test]
+fn test_unmapping_a_built_in_disables_it() {
+    let mut ws = new_workspace();
+    ws.state
+        .keymap
+        .nav
+        .insert(parse_keys("q").expect("bad lhs"), Target::Unmapped);
+    let exit = script().char('q').run(&mut ws).expect("Failed to run script");
+    assert_eq!(None, exit);
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_a_mapping_can_quit() {
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "<Space>", "q");
+    let exit = script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(ExitCode::SUCCESS), exit);
+}
+
+#[test]
+fn test_numeric_prefix_repeats_the_whole_mapping() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "<Space>", "jj");
+    script().chars("3 ").run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 6, ws.book.location.row);
+    assert!(ws.state.numeric_prefix.is_empty());
+}
+
+#[test]
+fn test_user_mappings_are_per_mode() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_nav(&mut ws, "z", "jj");
+    map_range(&mut ws, "x", "j");
+    // In navigation mode only the navigation mapping applies.
+    script().chars("zx").run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 2, ws.book.location.row);
+    // In range-select mode only the range mapping applies.
+    script().char('v').run(&mut ws).expect("Failed to run script");
+    script().chars("zx").run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
+    // `z` did nothing here, and the mapped `x` moved down one, not extended.
+    assert_eq!(row + 3, ws.book.location.row);
+}
+
+#[test]
+fn test_range_select_user_mapping_runs() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    map_range(&mut ws, "z", "jj");
+    script().chars("vz").run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
+    assert_eq!(row + 2, ws.book.location.row);
+}
+
+#[test]
+fn test_edit_mode_does_not_see_user_mappings() {
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "j", "kk");
+    script().chars("ij").run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::CellEdit), ws.state.modality_stack.last());
+    assert_eq!("j", ws.text_area.lines().join("\n"));
+}
+
+#[test]
+fn test_a_mapping_can_type_into_edit_mode() {
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "<Space>", "ihi<CR>");
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!(
+        "hi",
+        ws.book.get_current_cell_contents().expect("no contents")
+    );
 }
 
 macro_rules! assert_help_dialog {

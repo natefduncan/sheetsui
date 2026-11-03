@@ -152,6 +152,12 @@ impl<'widget, 'ws: 'widget> Widget for &'widget mut Workspace<'ws> {
                     self.state.theme.get(slot),
                 ));
             }
+            if !self.state.pending_keys.is_empty() {
+                outer_block = outer_block.title_bottom(Line::styled(
+                    format!(" {} ", crate::ui::keys::format_keys(&self.state.pending_keys)),
+                    status,
+                ));
+            }
             let outer_block = outer_block
                 .title_bottom(Line::styled(
                     match self.state.modality() {

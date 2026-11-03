@@ -2,6 +2,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{
     builtin::{self, Lookup, NavHandler, RangeHandler},
+    map::{resolve, resolve_timeout, Resolution, Target, UserLookup, UserTable},
     format_keys, parse_key, parse_keys, Key,
 };
 
@@ -357,4 +358,151 @@ fn range_select_has_hjkl_but_no_arrows() {
     let range = builtin::range_select();
     assert_eq!(Lookup::Match(RangeHandler::MoveDown), range.lookup(&[ch('j')]));
     assert_eq!(Lookup::None, range.lookup(&[Key::plain(KeyCode::Down)]));
+}
+
+fn keys(text: &str) -> Vec<Key> {
+    parse_keys(text).unwrap_or_else(|e| panic!("{text:?}: {e}"))
+}
+
+fn replay(text: &str) -> Target {
+    Target::Keys(keys(text))
+}
+
+fn user_table(mappings: &[(&str, &str)]) -> UserTable {
+    let mut table = UserTable::default();
+    for (lhs, rhs) in mappings {
+        table.insert(keys(lhs), replay(rhs));
+    }
+    table
+}
+
+#[test]
+fn a_user_table_starts_empty() {
+    let table = UserTable::default();
+    assert!(table.is_empty());
+    assert_eq!(UserLookup::None, table.lookup(&keys("j")));
+}
+
+#[test]
+fn user_lookup_distinguishes_match_prefix_and_none() {
+    let table = user_table(&[("<Space>c", "yj"), ("zz", "gg")]);
+    let target = replay("yj");
+    assert_eq!(UserLookup::Match(&target), table.lookup(&keys("<Space>c")));
+    assert_eq!(UserLookup::Prefix, table.lookup(&keys("<Space>")));
+    assert_eq!(UserLookup::Prefix, table.lookup(&keys("z")));
+    assert_eq!(UserLookup::None, table.lookup(&keys("<Space>x")));
+    assert_eq!(UserLookup::None, table.lookup(&keys("q")));
+}
+
+#[test]
+fn a_mapping_that_starts_a_longer_one_is_match_or_more() {
+    let table = user_table(&[("gt", "j"), ("gtt", "jj")]);
+    let short = replay("j");
+    assert_eq!(UserLookup::MatchOrMore(&short), table.lookup(&keys("gt")));
+    let long = replay("jj");
+    assert_eq!(UserLookup::Match(&long), table.lookup(&keys("gtt")));
+    assert_eq!(UserLookup::Prefix, table.lookup(&keys("g")));
+}
+
+#[test]
+fn inserting_the_same_keys_again_replaces_the_mapping() {
+    let mut table = user_table(&[("x", "j")]);
+    table.insert(keys("x"), replay("k"));
+    assert_eq!(1, table.mappings().len());
+    assert_eq!(replay("k"), table.mappings()[0].target);
+}
+
+#[test]
+fn removing_a_mapping() {
+    let mut table = user_table(&[("x", "j"), ("y", "k")]);
+    assert!(table.remove(&keys("x")));
+    assert!(!table.remove(&keys("x")));
+    assert_eq!(1, table.mappings().len());
+}
+
+#[test]
+fn longest_match_takes_the_longest_mapping_that_starts_the_keys() {
+    let table = user_table(&[("a", "j"), ("abc", "jj")]);
+    assert_eq!(Some(&replay("j")), table.longest_match(&keys("ab")));
+    assert_eq!(Some(&replay("jj")), table.longest_match(&keys("abc")));
+    assert_eq!(None, table.longest_match(&keys("b")));
+}
+
+#[test]
+fn the_built_ins_see_keys_that_no_user_mapping_wants() {
+    let user = user_table(&[("<Space>c", "yj")]);
+    let nav = builtin::navigation();
+    assert_eq!(
+        Resolution::Builtin(NavHandler::MoveDown),
+        resolve(&user, nav, &keys("j"))
+    );
+    // `g` is a built-in prefix: wait, but with no timeout.
+    assert_eq!(
+        Resolution::Wait { timeout: false },
+        resolve(&user, nav, &keys("g"))
+    );
+    assert_eq!(Resolution::Drop, resolve(&user, nav, &keys("z")));
+}
+
+#[test]
+fn a_user_mapping_wins_over_a_built_in() {
+    let user = user_table(&[("j", "k")]);
+    assert_eq!(
+        Resolution::User(replay("k")),
+        resolve(&user, builtin::navigation(), &keys("j"))
+    );
+}
+
+#[test]
+fn a_user_prefix_waits_with_a_timeout() {
+    let user = user_table(&[("<Space>c", "yj")]);
+    assert_eq!(
+        Resolution::Wait { timeout: true },
+        resolve(&user, builtin::navigation(), &keys("<Space>"))
+    );
+}
+
+#[test]
+fn a_user_mapping_shadows_the_built_ins_it_starts() {
+    // Mapping `g` hides `gg`: `g` is a mapping now.
+    let user = user_table(&[("g", "jj")]);
+    assert_eq!(
+        Resolution::User(replay("jj")),
+        resolve(&user, builtin::navigation(), &keys("g"))
+    );
+    // `nnoremap gg gg` gets it back: `g` waits, `gg` is a mapping.
+    let user = user_table(&[("g", "jj"), ("gg", "gg")]);
+    assert_eq!(
+        Resolution::Wait { timeout: true },
+        resolve(&user, builtin::navigation(), &keys("g"))
+    );
+    assert_eq!(
+        Resolution::User(replay("gg")),
+        resolve(&user, builtin::navigation(), &keys("gg"))
+    );
+}
+
+#[test]
+fn unmapping_hides_a_built_in() {
+    let mut user = UserTable::default();
+    user.insert(keys("q"), Target::Unmapped);
+    assert_eq!(
+        Resolution::User(Target::Unmapped),
+        resolve(&user, builtin::navigation(), &keys("q"))
+    );
+}
+
+#[test]
+fn an_empty_user_table_never_waits_on_a_user_timeout() {
+    let user = UserTable::default();
+    let nav = builtin::navigation();
+    assert_eq!(Resolution::Wait { timeout: false }, resolve(&user, nav, &keys("g")));
+    assert_eq!(Resolution::Builtin(NavHandler::MoveTop), resolve(&user, nav, &keys("gg")));
+}
+
+#[test]
+fn the_timeout_runs_the_longest_mapping_and_drops_nothing_else_it_cannot_run() {
+    let user = user_table(&[("gt", "j"), ("gtt", "jj")]);
+    assert_eq!(Some(replay("j")), resolve_timeout(&user, &keys("gt")));
+    assert_eq!(None, resolve_timeout(&user, &keys("g")));
 }

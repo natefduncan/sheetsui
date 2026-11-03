@@ -383,3 +383,29 @@ fn test_cells_outside_a_range_selection_keep_their_colors() {
     assert_eq!(Color::LightBlue, cell(5, 2).bg);
     assert_eq!(Color::Black, cell(6, 3).fg);
 }
+
+#[test]
+fn test_draw_shows_pending_keys_in_the_bottom_title() {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    let mut ws = crate::ui::Workspace::new_empty("en", "America/New_York").expect("workspace");
+    let bottom_row = |ws: &mut crate::ui::Workspace| {
+        let mut term = Terminal::new(TestBackend::new(60, 14)).expect("terminal");
+        term.draw(|f| super::draw(f, ws)).expect("draw");
+        let buf = term.backend().buffer().clone();
+        (0..buf.area.width)
+            .map(|x| buf[(x, buf.area.height - 1)].symbol().to_string())
+            .collect::<String>()
+    };
+    assert!(!bottom_row(&mut ws).contains(" g "));
+    ws.handle_input(Event::Key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty())))
+        .expect("handle key");
+    let row = bottom_row(&mut ws);
+    assert!(row.contains(" g "), "pending key missing from {row:?}");
+    assert!(row.contains("navigate"), "mode missing from {row:?}");
+    // And it goes away when the sequence ends.
+    ws.handle_input(Event::Key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty())))
+        .expect("handle key");
+    assert!(!bottom_row(&mut ws).contains(" g "));
+}

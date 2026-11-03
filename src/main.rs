@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::{path::PathBuf, process::ExitCode, time::{Duration, Instant}};
 
 use clap::Parser;
 use crossterm::event;
@@ -26,7 +26,17 @@ pub struct Args {
     theme: Option<String>,
 }
 
-type ReadFn = Box<dyn FnMut() -> anyhow::Result<event::Event>>;
+/// Reads the next event. With a timeout, returns `None` if it ran out first.
+type ReadFn = Box<dyn FnMut(Option<Duration>) -> anyhow::Result<Option<event::Event>>>;
+
+fn read_event(timeout: Option<Duration>) -> anyhow::Result<Option<event::Event>> {
+    if let Some(timeout) = timeout {
+        if !event::poll(timeout)? {
+            return Ok(None);
+        }
+    }
+    Ok(Some(event::read()?))
+}
 
 fn run(terminal: &mut ratatui::DefaultTerminal, args: Args) -> anyhow::Result<ExitCode> {
     let mut ws = if let Some(workbook_path) = &args.workbook {
@@ -41,22 +51,28 @@ fn run(terminal: &mut ratatui::DefaultTerminal, args: Args) -> anyhow::Result<Ex
     let mut read_func: ReadFn = if let Some(log_path) = args.log_input {
         {
             let log_file = std::fs::File::create(log_path)?;
-            Box::new(move || {
-                let evt = event::read()?;
+            Box::new(move |timeout| {
+                let Some(evt) = read_event(timeout)? else {
+                    return Ok(None);
+                };
                 to_writer(&log_file, &evt)?;
                 writeln!(&log_file)?;
-                Ok(evt)
+                Ok(Some(evt))
             })
         }
     } else {
-        Box::new(|| {
-            let evt = event::read()?;
-            Ok(evt)
-        })
+        Box::new(read_event)
     };
     loop {
         terminal.draw(|frame| ui::render::draw(frame, &mut ws))?;
-        if let Some(code) = ws.handle_input(read_func()?)? {
+        let timeout = ws
+            .key_deadline()
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+        let code = match read_func(timeout)? {
+            Some(evt) => ws.handle_input(evt)?,
+            None => ws.handle_key_timeout()?,
+        };
+        if let Some(code) = code {
             return Ok(code);
         }
     }
