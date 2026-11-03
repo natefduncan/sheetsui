@@ -28,13 +28,14 @@ open:
    without a clock.
 4. **Modifier guards change behavior.** Arms like
    `'j' | Down if modifiers != CONTROL` also fire for `Alt-j` and
-   `Ctrl-Shift-…` today. Exact lookup on normalized keys stops that. This is
-   the one intended behavior change, noted in the design; stage 2 lists every
-   arm whose behavior differs, so it is reviewed rather than discovered.
+   `Ctrl-Shift-…` today. Exact lookup on normalized keys stops that. The
+   changes are listed in the design and pinned by tests in stage 2.
 5. **Shift arrives two ways.** Terminals send `Char('B')` with SHIFT set, or
    without it. The normalizer drops SHIFT from character keys. `Shift+Enter`
-   and `Shift+Tab` keep it. The `Char('C') if contains(CONTROL)` arm is a
-   workaround for the same problem and goes away.
+   and `Shift+Tab` keep it. `Ctrl` on a capital letter stays its own key
+   (an existing test sends it), so the Ctrl-Shift-C arms are kept as direct
+   table entries. `BackTab` is folded into `Shift+Tab`: the old
+   `Tab if SHIFT` arm never matched what terminals send.
 6. **`s` has two arms and `p`, `v`, `r`, `h`, `l` have a bare and a Ctrl
    arm** that depend on arm order and guards. A table has no order, so each
    becomes an entry per distinct key. A test per pair pins the old behavior.

@@ -383,6 +383,191 @@ fn test_input_navitation_shift_tab_key() {
     assert_eq!(col, ws.book.location.col);
 }
 
+#[test]
+fn test_back_tab_moves_left() {
+    // Most terminals send Shift+Tab as BackTab.
+    let mut ws = new_workspace();
+    let col = ws.book.location.col;
+    script().tab().run(&mut ws).expect("Failed to run script");
+    assert_eq!(col + 1, ws.book.location.col);
+    script()
+        .event(construct_modified_key_event(
+            KeyCode::BackTab,
+            KeyModifiers::SHIFT,
+        ))
+        .run(&mut ws)
+        .expect("Failed to run script");
+    assert_eq!(col, ws.book.location.col);
+}
+
+#[test]
+fn test_gg_goes_to_top() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    script().chars("jjj").run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 3, ws.book.location.row);
+    script().chars("gg").run(&mut ws).expect("Failed to run script");
+    assert_eq!(row, ws.book.location.row);
+    assert!(ws.state.pending_keys.is_empty());
+}
+
+#[test]
+fn test_g_waits_for_the_next_key() {
+    let mut ws = new_workspace();
+    script().chars("jjjg").run(&mut ws).expect("Failed to run script");
+    assert_eq!(1, ws.state.pending_keys.len());
+}
+
+#[test]
+fn test_g_then_another_key_drops_both() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    script().chars("jjjgj").run(&mut ws).expect("Failed to run script");
+    // The `j` after `g` is swallowed: `gj` is not a key.
+    assert_eq!(row + 3, ws.book.location.row);
+    assert!(ws.state.pending_keys.is_empty());
+    // And the `g` does not wait around for a later `g`.
+    script().char('g').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 3, ws.book.location.row);
+}
+
+#[test]
+fn test_esc_cancels_a_pending_g() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    script()
+        .chars("jjjg")
+        .esc()
+        .char('g')
+        .run(&mut ws)
+        .expect("Failed to run script");
+    assert_eq!(row + 3, ws.book.location.row);
+    assert_eq!(1, ws.state.pending_keys.len());
+}
+
+#[test]
+fn test_a_digit_after_g_is_not_a_numeric_prefix() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    script().chars("g5j").run(&mut ws).expect("Failed to run script");
+    assert!(ws.state.numeric_prefix.is_empty());
+    assert_eq!(row + 1, ws.book.location.row);
+}
+
+#[test]
+fn test_numeric_prefix_applies_to_a_move() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    script().chars("12j").run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 12, ws.book.location.row);
+}
+
+#[test]
+fn test_extra_modifiers_do_not_fire_a_bare_key() {
+    // Before the key table these moved, because the arms only excluded Ctrl.
+    let mut ws = new_workspace();
+    let (row, col) = (ws.book.location.row, ws.book.location.col);
+    script()
+        .alt('j')
+        .alt('l')
+        .event(construct_modified_key_event(
+            KeyCode::Down,
+            KeyModifiers::SHIFT,
+        ))
+        .event(construct_modified_key_event(
+            KeyCode::Right,
+            KeyModifiers::ALT,
+        ))
+        .run(&mut ws)
+        .expect("Failed to run script");
+    assert_eq!((row, col), (ws.book.location.row, ws.book.location.col));
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_a_modified_digit_is_not_a_numeric_prefix() {
+    let mut ws = new_workspace();
+    script().alt('5').run(&mut ws).expect("Failed to run script");
+    assert!(ws.state.numeric_prefix.is_empty());
+}
+
+#[test]
+fn test_bare_and_ctrl_keys_are_different_keys() {
+    // `s` clears and edits, `r` redoes, `v` selects, `h` moves, `l` moves.
+    // Ctrl-r selects a range and Alt-h opens help.
+    let mut ws = new_workspace();
+    script().char('s').run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::CellEdit), ws.state.modality_stack.last());
+
+    let mut ws = new_workspace();
+    script().char('r').run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    script().ctrl('r').run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
+
+    let mut ws = new_workspace();
+    script().alt('h').run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_ctrl_h_and_ctrl_l_resize_the_column() {
+    let mut ws = new_workspace();
+    let col = ws.book.location.col;
+    let size = ws.book.get_col_size(col).expect("no column size");
+    script().ctrl('l').run(&mut ws).expect("Failed to run script");
+    assert_eq!(size + 1, ws.book.get_col_size(col).expect("no column size"));
+    script().ctrl('h').run(&mut ws).expect("Failed to run script");
+    assert_eq!(size, ws.book.get_col_size(col).expect("no column size"));
+    // Neither moved the cursor.
+    assert_eq!(col, ws.book.location.col);
+}
+
+#[test]
+fn test_ctrl_n_and_ctrl_p_switch_sheets() {
+    let mut ws = new_workspace();
+    ws.book.new_sheet(Some("Sheet2")).expect("failed to create sheet2");
+    let sheet = ws.book.location.sheet;
+    script().ctrl('n').run(&mut ws).expect("Failed to run script");
+    assert_ne!(sheet, ws.book.location.sheet);
+    script().ctrl('p').run(&mut ws).expect("Failed to run script");
+    assert_eq!(sheet, ws.book.location.sheet);
+}
+
+#[test]
+fn test_range_select_digits_are_a_numeric_prefix() {
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    script().char('v').run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
+    script().chars("4j").run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 4, ws.book.location.row);
+}
+
+#[test]
+fn test_range_select_esc_clears_a_numeric_prefix_before_leaving() {
+    let mut ws = new_workspace();
+    script().chars("v4").run(&mut ws).expect("Failed to run script");
+    script().esc().run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
+    assert!(ws.state.numeric_prefix.is_empty());
+    script().esc().run(&mut ws).expect("Failed to run script");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_range_select_does_not_take_the_arrow_keys() {
+    // Unchanged from before the key table: only hjkl move in range-select.
+    let mut ws = new_workspace();
+    let row = ws.book.location.row;
+    script()
+        .char('v')
+        .event(construct_key_event(KeyCode::Down))
+        .run(&mut ws)
+        .expect("Failed to run script");
+    assert_eq!(row, ws.book.location.row);
+}
+
 macro_rules! assert_help_dialog {
     ($exit : expr) => {{
         let mut ws = new_workspace();

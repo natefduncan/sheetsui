@@ -4,6 +4,8 @@ use std::fmt;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+pub mod builtin;
+
 #[cfg(test)]
 mod test;
 
@@ -18,8 +20,10 @@ const KEPT: KeyModifiers = KeyModifiers::SHIFT
 /// built through [`Key::new`], which folds the variants into one:
 ///
 /// * Shift on a character is part of the character: `B`, not `<S-b>`.
-/// * `Ctrl` on an uppercase letter is `Ctrl` on the lowercase letter. A
-///   terminal without the kitty keyboard protocol cannot tell them apart.
+/// * `Ctrl` on a capital letter stays a different key from `Ctrl` on the
+///   lowercase letter. Most terminals cannot send it, but some do (Ctrl-Shift-C
+///   copies a cell as it is displayed). The notation cannot write it; the
+///   built-in tables add it directly.
 /// * `Ctrl-i`, `Ctrl-m` and `Ctrl-[` are `<Tab>`, `<CR>` and `<Esc>`: a
 ///   terminal sends the same code for each pair.
 /// * `BackTab` is `<S-Tab>`.
@@ -43,14 +47,14 @@ impl Key {
         if let KeyCode::Char(c) = code {
             mods.remove(KeyModifiers::SHIFT);
             if mods.contains(KeyModifiers::CONTROL) {
-                let c = c.to_ascii_lowercase();
-                code = match c {
-                    'i' => KeyCode::Tab,
-                    'm' => KeyCode::Enter,
-                    '[' => KeyCode::Esc,
-                    _ => KeyCode::Char(c),
+                let folded = match c {
+                    'i' => Some(KeyCode::Tab),
+                    'm' => Some(KeyCode::Enter),
+                    '[' => Some(KeyCode::Esc),
+                    _ => None,
                 };
-                if !matches!(code, KeyCode::Char(_)) {
+                if let Some(folded) = folded {
+                    code = folded;
                     mods.remove(KeyModifiers::CONTROL);
                 }
             }
@@ -201,6 +205,13 @@ fn parse_bracketed(inner: &str) -> Result<Key, KeyError> {
             ));
         }
     }
+    // As in vim, `<C-X>` is Ctrl and the letter, whatever its case.
+    let code = match code {
+        KeyCode::Char(c) if mods.contains(KeyModifiers::CONTROL) => {
+            KeyCode::Char(c.to_ascii_lowercase())
+        }
+        code => code,
+    };
     Ok(Key::new(code, mods))
 }
 
@@ -238,6 +249,9 @@ impl fmt::Display for Key {
         if !(needs_brackets || ctrl || alt || shift) {
             return f.write_str(&text);
         }
+        // Ctrl on a capital letter is Ctrl and Shift. It reads as `<C-S-c>`,
+        // which the parser rejects, so it is never mistaken for `<C-c>`.
+        let ctrl_capital = matches!(self.code, KeyCode::Char(c) if ctrl && c.is_ascii_uppercase());
         f.write_str("<")?;
         if ctrl {
             f.write_str("C-")?;
@@ -245,10 +259,14 @@ impl fmt::Display for Key {
         if alt {
             f.write_str("A-")?;
         }
-        if shift {
+        if shift || ctrl_capital {
             f.write_str("S-")?;
         }
-        f.write_str(&text)?;
+        if ctrl_capital {
+            f.write_str(&text.to_ascii_lowercase())?;
+        } else {
+            f.write_str(&text)?;
+        }
         f.write_str(">")
     }
 }

@@ -22,7 +22,7 @@ use ratatui_textarea::{CursorMove, TextArea};
 mod cmd;
 mod help;
 mod history;
-// Not used until the built-in key table lands; see planning/keys-plan.md.
+// Parts are not used until the later stages of planning/keys-plan.md.
 #[allow(dead_code)]
 pub mod keys;
 pub mod render;
@@ -31,6 +31,10 @@ pub mod theme;
 mod test;
 
 use cmd::{Cmd, CmdSortKey};
+use keys::{
+    builtin::{Lookup, NavHandler, RangeHandler},
+    Key,
+};
 pub use history::CommandHistory;
 use theme::{lookup, parse::Warning, Slot, Theme};
 use render::{markdown::Markdown, viewport::ViewportState};
@@ -109,7 +113,8 @@ pub struct AppState<'ws> {
     pub command_state: TextState<'ws>,
     pub command_history: CommandHistory,
     pub numeric_prefix: Vec<char>,
-    pub char_queue: Vec<char>,
+    /// Keys typed so far that are the start of a longer key sequence.
+    pub pending_keys: Vec<Key>,
     pub range_select: RangeSelection,
     pub dialog_scroll: u16,
     pub theme: Theme,
@@ -131,7 +136,7 @@ impl<'ws> Default for AppState<'ws> {
             command_state: Default::default(),
             command_history: Default::default(),
             numeric_prefix: Default::default(),
-            char_queue: Default::default(),
+            pending_keys: Default::default(),
             range_select: Default::default(),
             dialog_scroll: 0,
             theme: Theme::default(),
@@ -657,119 +662,141 @@ impl<'ws> Workspace<'ws> {
         self.state.numeric_prefix.push(digit);
     }
 
+    /// Takes a digit as part of the numeric prefix, if no other keys are
+    /// pending. Returns whether it did.
+    fn take_numeric_prefix(&mut self, key: &Key) -> bool {
+        if !self.state.pending_keys.is_empty() {
+            return false;
+        }
+        match key.as_char() {
+            Some(d) if d.is_ascii_digit() => {
+                self.handle_numeric_prefix(d);
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn handle_range_select_input(&mut self, key: event::KeyEvent) -> Result<Option<ExitCode>> {
-        if key.kind == KeyEventKind::Press {
-            match key.code {
-                KeyCode::Esc => {
-                    if !self.state.numeric_prefix.is_empty() {
-                        self.state.reset_n_prefix();
-                    } else {
-                        self.state.range_select.start = None;
-                        self.state.range_select.end = None;
-                        self.exit_range_select_mode()?;
-                    }
+        if key.kind != KeyEventKind::Press {
+            return Ok(None);
+        }
+        let key = Key::from_event(&key);
+        if key == Key::plain(KeyCode::Esc) {
+            if !self.state.numeric_prefix.is_empty() || !self.state.pending_keys.is_empty() {
+                self.state.reset_n_prefix();
+                self.state.pending_keys.clear();
+            } else {
+                self.state.range_select.start = None;
+                self.state.range_select.end = None;
+                self.exit_range_select_mode()?;
+            }
+            return Ok(None);
+        }
+        if self.take_numeric_prefix(&key) {
+            return Ok(None);
+        }
+        self.state.pending_keys.push(key);
+        match keys::builtin::range_select().lookup(&self.state.pending_keys) {
+            Lookup::Match(handler) => {
+                self.state.pending_keys.clear();
+                self.run_range_handler(handler)
+            }
+            Lookup::Prefix => Ok(None),
+            Lookup::None => {
+                self.state.pending_keys.clear();
+                Ok(None)
+            }
+        }
+    }
+
+    fn run_range_handler(&mut self, handler: RangeHandler) -> Result<Option<ExitCode>> {
+        match handler {
+            RangeHandler::Help => {
+                self.enter_dialog_mode(self.render_help_text());
+            }
+            RangeHandler::ClearRangeAll => {
+                if let Some((start, end)) = self.state.range_select.get_range() {
+                    self.book.clear_cell_range_all(start, end)?;
                 }
-                KeyCode::Char('h') if key.modifiers == KeyModifiers::ALT => {
-                    self.enter_dialog_mode(self.render_help_text());
-                    return Ok(None);
+            }
+            RangeHandler::ClearRange => {
+                if let Some((start, end)) = self.state.range_select.get_range() {
+                    self.book.clear_cell_range(start, end)?;
                 }
-                KeyCode::Char(d) if d.is_ascii_digit() => {
-                    self.handle_numeric_prefix(d);
-                }
-                KeyCode::Char('D') => {
-                    if let Some((start, end)) = self.state.range_select.get_range() {
-                        self.book.clear_cell_range_all(start, end)?;
-                    }
-                }
-                KeyCode::Char('d') => {
-                    if let Some((start, end)) = self.state.range_select.get_range() {
-                        self.book.clear_cell_range(start, end)?;
-                    }
-                }
-                KeyCode::Char('s') => {
-                    self.sort_range_selection(false)?;
-                }
-                KeyCode::Char('S') => {
-                    self.sort_range_selection(true)?;
-                }
-                KeyCode::Char('h') => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_left()?;
-                        Ok(())
-                    })?;
-                    self.maybe_update_range_end();
-                }
-                KeyCode::Char('j') => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_down()?;
-                        Ok(())
-                    })?;
-                    self.maybe_update_range_end();
-                }
-                KeyCode::Char('k') => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_up()?;
-                        Ok(())
-                    })?;
-                    self.maybe_update_range_end();
-                }
-                KeyCode::Char('l') => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_right()?;
-                        Ok(())
-                    })?;
-                    self.maybe_update_range_end();
-                }
-                KeyCode::Char(' ') | KeyCode::Enter => {
-                    if self.update_range_selection()? {
-                        self.exit_range_select_mode()?;
-                    }
-                }
-                KeyCode::Char('n') if key.modifiers == KeyModifiers::CONTROL => {
-                    self.state.range_select.reset_range_selection();
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.book.select_next_sheet();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => {
-                    self.state.range_select.reset_range_selection();
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.book.select_prev_sheet();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.copy_range(true)?;
+            }
+            RangeHandler::SortDesc => {
+                self.sort_range_selection(false)?;
+            }
+            RangeHandler::SortAsc => {
+                self.sort_range_selection(true)?;
+            }
+            RangeHandler::MoveLeft => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.move_left()?;
+                    Ok(())
+                })?;
+                self.maybe_update_range_end();
+            }
+            RangeHandler::MoveDown => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.move_down()?;
+                    Ok(())
+                })?;
+                self.maybe_update_range_end();
+            }
+            RangeHandler::MoveUp => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.move_up()?;
+                    Ok(())
+                })?;
+                self.maybe_update_range_end();
+            }
+            RangeHandler::MoveRight => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.move_right()?;
+                    Ok(())
+                })?;
+                self.maybe_update_range_end();
+            }
+            RangeHandler::Select => {
+                if self.update_range_selection()? {
                     self.exit_range_select_mode()?;
                 }
-                KeyCode::Char('y') => {
-                    self.copy_range(true)?;
-                    self.exit_range_select_mode()?;
+            }
+            RangeHandler::NextSheet => {
+                self.state.range_select.reset_range_selection();
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.book.select_next_sheet();
+                    Ok(())
+                })?;
+            }
+            RangeHandler::PrevSheet => {
+                self.state.range_select.reset_range_selection();
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.book.select_prev_sheet();
+                    Ok(())
+                })?;
+            }
+            RangeHandler::CopyFormatted => {
+                self.copy_range(true)?;
+                self.exit_range_select_mode()?;
+            }
+            RangeHandler::CopyRaw => {
+                self.copy_range(false)?;
+                self.exit_range_select_mode()?;
+            }
+            RangeHandler::Extend => {
+                if let (Some(from), Some(to)) = (
+                    self.state.range_select.start.as_ref(),
+                    self.state.range_select.end.as_ref(),
+                ) {
+                    self.book.extend_to(from, to)?;
                 }
-                KeyCode::Char('C') if key.modifiers == KeyModifiers::CONTROL => {
-                    self.copy_range(false)?;
-                    self.exit_range_select_mode()?;
-                }
-                KeyCode::Char('Y') => {
-                    self.copy_range(false)?;
-                    self.exit_range_select_mode()?;
-                }
-                KeyCode::Char('x') => {
-                    if let (Some(from), Some(to)) = (
-                        self.state.range_select.start.as_ref(),
-                        self.state.range_select.end.as_ref(),
-                    ) {
-                        self.book.extend_to(from, to)?;
-                    }
-                    self.exit_range_select_mode()?;
-                }
-                KeyCode::Char(':') => {
-                    self.enter_command_mode();
-                }
-                _ => {
-                    // moop
-                }
+                self.exit_range_select_mode()?;
+            }
+            RangeHandler::EnterCommand => {
+                self.enter_command_mode();
             }
         }
         Ok(None)
@@ -915,206 +942,171 @@ impl<'ws> Workspace<'ws> {
     }
 
     fn handle_navigation_input(&mut self, key: event::KeyEvent) -> Result<Option<ExitCode>> {
-        if key.kind == KeyEventKind::Press {
-            match key.code {
-                KeyCode::Esc => {
-                    self.state.reset_n_prefix();
-                    self.state.char_queue.clear();
-                }
-                KeyCode::Char('B') => {
-                    let address = self.book.location.clone();
-                    let style = self.book.get_cell_style(&address).map(|s| s.font.b);
-                    self.toggle_bool_style(style, "font.b", &address)?;
-                }
-                KeyCode::Char('I') => {
-                    let address = self.book.location.clone();
-                    let style = self.book.get_cell_style(&address).map(|s| s.font.i);
-                    self.toggle_bool_style(style, "font.i", &address)?;
-                }
-                KeyCode::Char(d) if d.is_ascii_digit() => {
-                    self.handle_numeric_prefix(d);
-                }
-                KeyCode::Char('e') | KeyCode::Char('i') => {
-                    self.enter_edit_mode();
-                }
-                KeyCode::Char(':') => {
-                    self.enter_command_mode();
-                }
-                KeyCode::Char('s') if key.modifiers == KeyModifiers::CONTROL => {
-                    self.save_file()?;
-                }
-                KeyCode::Char('s') if key.modifiers != KeyModifiers::CONTROL => {
-                    self.book.clear_current_cell()?;
-                    self.text_area = reset_text_area(String::new(), &self.state.theme);
-                    self.enter_edit_mode();
-                }
-                KeyCode::Char('r') if key.modifiers == KeyModifiers::CONTROL => {
-                    self.enter_range_select_mode(false);
-                }
-                KeyCode::Char('c') if key.modifiers == KeyModifiers::CONTROL => {
-                    self.copy_cell_to_clipboard(false)?;
-                }
-                KeyCode::Char('y') => {
-                    self.copy_cell_to_clipboard(false)?;
-                }
-                KeyCode::Char('Y') => {
-                    self.copy_cell_to_clipboard(true)?;
-                }
-                KeyCode::Char('C') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                    self.copy_cell_to_clipboard(true)?;
-                }
-                KeyCode::Char('v') if key.modifiers != KeyModifiers::CONTROL => {
-                    self.enter_range_select_mode(true)
-                }
-                KeyCode::Char('p') if key.modifiers != KeyModifiers::CONTROL => {
-                    self.paste_range()?;
-                }
-                KeyCode::Char('v') if key.modifiers == KeyModifiers::CONTROL => {
-                    self.paste_range()?;
-                }
-                KeyCode::Char('h') if key.modifiers == KeyModifiers::ALT => {
-                    self.enter_dialog_mode(self.render_help_text());
-                }
-                KeyCode::Char('n') if key.modifiers == KeyModifiers::CONTROL => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.book.select_next_sheet();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Char('d') => {
-                    self.book.clear_current_cell()?;
-                }
-                KeyCode::Char('D') => {
-                    self.book.clear_current_cell_all()?;
-                }
-                KeyCode::Char('p') if key.modifiers == KeyModifiers::CONTROL => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.book.select_prev_sheet();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Char('l') if key.modifiers == KeyModifiers::CONTROL => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        let Address {
-                            sheet: _,
-                            row: _,
-                            col,
-                        } = &ws.book.location;
-                        ws.book
-                            .set_col_size(*col, ws.book.get_col_size(*col)? + 1)?;
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Char('h') if key.modifiers == KeyModifiers::CONTROL => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        let Address {
-                            sheet: _,
-                            row: _,
-                            col,
-                        } = &ws.book.location;
-                        let curr_size = ws.book.get_col_size(*col)?;
-                        if curr_size > 1 {
-                            ws.book.set_col_size(*col, curr_size - 1)?;
-                        }
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Char('q') => {
-                    return self.quit_app();
-                }
-                KeyCode::Char('j') | KeyCode::Down if key.modifiers != KeyModifiers::CONTROL => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_down()?;
-                        ws.handle_movement_change();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Enter if key.modifiers != KeyModifiers::SHIFT => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_down()?;
-                        ws.handle_movement_change();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Enter if key.modifiers == KeyModifiers::SHIFT => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_up()?;
-                        ws.handle_movement_change();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Char('k') | KeyCode::Up if key.modifiers != KeyModifiers::CONTROL => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_up()?;
-                        ws.handle_movement_change();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Char('h') | KeyCode::Left if key.modifiers != KeyModifiers::CONTROL => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_left()?;
-                        ws.handle_movement_change();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Char('l') | KeyCode::Right if key.modifiers != KeyModifiers::CONTROL => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_right()?;
-                        ws.handle_movement_change();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Tab if key.modifiers != KeyModifiers::SHIFT => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_right()?;
-                        ws.handle_movement_change();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Tab if key.modifiers == KeyModifiers::SHIFT => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
-                        ws.move_left()?;
-                        ws.handle_movement_change();
-                        Ok(())
-                    })?;
-                }
-                KeyCode::Char('g') => {
-                    // TODO(zaphar): This really needs a better state machine.
-                    if self
-                        .state
-                        .char_queue
-                        .first()
-                        .map(|c| *c == 'g')
-                        .unwrap_or(false)
-                    {
-                        self.state.char_queue.pop();
-                        self.move_to_top()?;
-                    } else {
-                        self.state.char_queue.push('g');
+        if key.kind != KeyEventKind::Press {
+            return Ok(None);
+        }
+        let key = Key::from_event(&key);
+        if key == Key::plain(KeyCode::Esc) {
+            self.state.reset_n_prefix();
+            self.state.pending_keys.clear();
+            return Ok(None);
+        }
+        if self.take_numeric_prefix(&key) {
+            return Ok(None);
+        }
+        self.state.pending_keys.push(key);
+        match keys::builtin::navigation().lookup(&self.state.pending_keys) {
+            Lookup::Match(handler) => {
+                self.state.pending_keys.clear();
+                self.run_nav_handler(handler)
+            }
+            Lookup::Prefix => Ok(None),
+            Lookup::None => {
+                self.state.pending_keys.clear();
+                Ok(None)
+            }
+        }
+    }
+
+    fn run_nav_handler(&mut self, handler: NavHandler) -> Result<Option<ExitCode>> {
+        match handler {
+            NavHandler::ToggleBold => {
+                let address = self.book.location.clone();
+                let style = self.book.get_cell_style(&address).map(|s| s.font.b);
+                self.toggle_bool_style(style, "font.b", &address)?;
+            }
+            NavHandler::ToggleItalic => {
+                let address = self.book.location.clone();
+                let style = self.book.get_cell_style(&address).map(|s| s.font.i);
+                self.toggle_bool_style(style, "font.i", &address)?;
+            }
+            NavHandler::EnterEdit => {
+                self.enter_edit_mode();
+            }
+            NavHandler::EnterCommand => {
+                self.enter_command_mode();
+            }
+            NavHandler::Save => {
+                self.save_file()?;
+            }
+            NavHandler::Substitute => {
+                self.book.clear_current_cell()?;
+                self.text_area = reset_text_area(String::new(), &self.state.theme);
+                self.enter_edit_mode();
+            }
+            NavHandler::EnterRangeSelect => {
+                self.enter_range_select_mode(false);
+            }
+            NavHandler::CopyCell => {
+                self.copy_cell_to_clipboard(false)?;
+            }
+            NavHandler::CopyCellFormatted => {
+                self.copy_cell_to_clipboard(true)?;
+            }
+            NavHandler::EnterVisual => {
+                self.enter_range_select_mode(true);
+            }
+            NavHandler::Paste => {
+                self.paste_range()?;
+            }
+            NavHandler::Help => {
+                self.enter_dialog_mode(self.render_help_text());
+            }
+            NavHandler::NextSheet => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.book.select_next_sheet();
+                    Ok(())
+                })?;
+            }
+            NavHandler::PrevSheet => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.book.select_prev_sheet();
+                    Ok(())
+                })?;
+            }
+            NavHandler::ClearCell => {
+                self.book.clear_current_cell()?;
+            }
+            NavHandler::ClearCellAll => {
+                self.book.clear_current_cell_all()?;
+            }
+            NavHandler::ColWider => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    let Address {
+                        sheet: _,
+                        row: _,
+                        col,
+                    } = &ws.book.location;
+                    ws.book
+                        .set_col_size(*col, ws.book.get_col_size(*col)? + 1)?;
+                    Ok(())
+                })?;
+            }
+            NavHandler::ColNarrower => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    let Address {
+                        sheet: _,
+                        row: _,
+                        col,
+                    } = &ws.book.location;
+                    let curr_size = ws.book.get_col_size(*col)?;
+                    if curr_size > 1 {
+                        ws.book.set_col_size(*col, curr_size - 1)?;
                     }
-                }
-                KeyCode::Char('o') => {
-                    self.book.insert_rows(self.book.location.row+1, 1)?;
-                    self.move_down()?;
-                    self.handle_movement_change();
-                    self.enter_edit_mode();
-                },
-                KeyCode::Char('O') => {
-                    self.book.insert_rows(self.book.location.row, 1)?;
-                    self.move_up()?;
-                    self.handle_movement_change();
-                    self.enter_edit_mode();
-                },
-                KeyCode::Char('u') => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> { ws.undo() })?;
-                }
-                KeyCode::Char('r') if key.modifiers != KeyModifiers::CONTROL => {
-                    self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> { ws.redo() })?;
-                }
-                _ => {
-                    // noop
-                    self.state.char_queue.clear();
-                }
+                    Ok(())
+                })?;
+            }
+            NavHandler::Quit => {
+                return self.quit_app();
+            }
+            NavHandler::MoveDown => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.move_down()?;
+                    ws.handle_movement_change();
+                    Ok(())
+                })?;
+            }
+            NavHandler::MoveUp => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.move_up()?;
+                    ws.handle_movement_change();
+                    Ok(())
+                })?;
+            }
+            NavHandler::MoveLeft => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.move_left()?;
+                    ws.handle_movement_change();
+                    Ok(())
+                })?;
+            }
+            NavHandler::MoveRight => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
+                    ws.move_right()?;
+                    ws.handle_movement_change();
+                    Ok(())
+                })?;
+            }
+            NavHandler::MoveTop => {
+                self.move_to_top()?;
+            }
+            NavHandler::InsertRowBelow => {
+                self.book.insert_rows(self.book.location.row + 1, 1)?;
+                self.move_down()?;
+                self.handle_movement_change();
+                self.enter_edit_mode();
+            }
+            NavHandler::InsertRowAbove => {
+                self.book.insert_rows(self.book.location.row, 1)?;
+                self.move_up()?;
+                self.handle_movement_change();
+                self.enter_edit_mode();
+            }
+            NavHandler::Undo => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> { ws.undo() })?;
+            }
+            NavHandler::Redo => {
+                self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> { ws.redo() })?;
             }
         }
         Ok(None)

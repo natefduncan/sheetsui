@@ -1,6 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::{format_keys, parse_key, parse_keys, Key};
+use super::{
+    builtin::{self, Lookup, NavHandler, RangeHandler},
+    format_keys, parse_key, parse_keys, Key,
+};
 
 const NONE: KeyModifiers = KeyModifiers::NONE;
 const CTRL: KeyModifiers = KeyModifiers::CONTROL;
@@ -52,12 +55,15 @@ fn ctrl_pairs_fold_into_the_key_a_terminal_sends() {
 }
 
 #[test]
-fn ctrl_on_a_capital_letter_is_ctrl_on_the_lowercase_letter() {
-    assert_eq!(key(KeyCode::Char('c'), CTRL), key(KeyCode::Char('C'), CTRL));
+fn ctrl_on_a_capital_letter_is_its_own_key() {
+    assert_ne!(key(KeyCode::Char('c'), CTRL), key(KeyCode::Char('C'), CTRL));
+    // A terminal that reports Shift as well sends the same key.
     assert_eq!(
-        key(KeyCode::Char('c'), CTRL),
+        key(KeyCode::Char('C'), CTRL),
         key(KeyCode::Char('C'), CTRL | SHIFT)
     );
+    assert_eq!("<C-S-c>", key(KeyCode::Char('C'), CTRL).to_string());
+    assert!(parse_keys("<C-S-c>").is_err());
 }
 
 #[test]
@@ -153,7 +159,7 @@ fn ctrl_and_alt_with_a_character() {
 }
 
 #[test]
-fn ctrl_with_a_capital_letter_is_the_lowercase_key() {
+fn ctrl_with_a_capital_letter_in_notation_is_the_lowercase_key() {
     assert_eq!(one("<C-s>"), one("<C-S>"));
 }
 
@@ -277,4 +283,78 @@ fn keys_hash_the_same_when_equal() {
     assert!(set.contains(&ch('B')));
     set.insert(key(KeyCode::BackTab, SHIFT));
     assert!(set.contains(&one("<S-Tab>")));
+}
+
+#[test]
+fn the_built_in_tables_build() {
+    assert!(!builtin::navigation().entries().is_empty());
+    assert!(!builtin::range_select().entries().is_empty());
+}
+
+#[test]
+fn every_handler_has_a_key() {
+    for handler in NavHandler::ALL {
+        assert!(
+            builtin::navigation().entries().iter().any(|(_, h)| h == handler),
+            "{handler:?} has no key in navigation mode"
+        );
+    }
+    for handler in RangeHandler::ALL {
+        assert!(
+            builtin::range_select().entries().iter().any(|(_, h)| h == handler),
+            "{handler:?} has no key in range-select mode"
+        );
+    }
+}
+
+#[test]
+fn every_handler_has_a_group_and_a_description() {
+    for handler in NavHandler::ALL {
+        assert!(!handler.group().is_empty(), "{handler:?}");
+        assert!(!handler.description().is_empty(), "{handler:?}");
+    }
+    for handler in RangeHandler::ALL {
+        assert!(!handler.group().is_empty(), "{handler:?}");
+        assert!(!handler.description().is_empty(), "{handler:?}");
+    }
+}
+
+#[test]
+fn lookup_finds_a_match_a_prefix_or_nothing() {
+    let nav = builtin::navigation();
+    assert_eq!(Lookup::Match(NavHandler::MoveDown), nav.lookup(&[ch('j')]));
+    assert_eq!(Lookup::Prefix, nav.lookup(&[ch('g')]));
+    assert_eq!(Lookup::Match(NavHandler::MoveTop), nav.lookup(&[ch('g'), ch('g')]));
+    assert_eq!(Lookup::None, nav.lookup(&[ch('g'), ch('j')]));
+    assert_eq!(Lookup::None, nav.lookup(&[ch('z')]));
+}
+
+#[test]
+fn ctrl_shift_c_is_a_copy_in_both_modes() {
+    let k = key(KeyCode::Char('C'), CTRL);
+    assert_eq!(
+        Lookup::Match(NavHandler::CopyCellFormatted),
+        builtin::navigation().lookup(&[k])
+    );
+    assert_eq!(
+        Lookup::Match(RangeHandler::CopyRaw),
+        builtin::range_select().lookup(&[k])
+    );
+    // And Ctrl-c is the other one, in the other order, as before.
+    let k = key(KeyCode::Char('c'), CTRL);
+    assert_eq!(
+        Lookup::Match(NavHandler::CopyCell),
+        builtin::navigation().lookup(&[k])
+    );
+    assert_eq!(
+        Lookup::Match(RangeHandler::CopyFormatted),
+        builtin::range_select().lookup(&[k])
+    );
+}
+
+#[test]
+fn range_select_has_hjkl_but_no_arrows() {
+    let range = builtin::range_select();
+    assert_eq!(Lookup::Match(RangeHandler::MoveDown), range.lookup(&[ch('j')]));
+    assert_eq!(Lookup::None, range.lookup(&[Key::plain(KeyCode::Down)]));
 }

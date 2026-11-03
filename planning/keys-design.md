@@ -79,6 +79,12 @@ accepted and are the same key as `<Tab>` and `<CR>`: a terminal sends the
 same code for both. `<C-S-x>` is rejected: a terminal cannot report it
 without the kitty protocol.
 
+Ctrl on a capital letter is a different key from Ctrl on the lowercase
+letter, for the few terminals that report it (Ctrl-Shift-C copies a cell as
+it is displayed). The notation cannot write it: `<C-C>` is `<C-c>`, as in
+vim, and `<C-S-c>` is rejected. The built-in tables add the key directly, and
+it prints as `<C-S-c>`.
+
 Modifiers combine: `<C-A-x>`. A key press event with kind `Release` or
 `Repeat` is ignored, as today.
 
@@ -180,10 +186,20 @@ normalized key.
 The table is the single source for dispatch, for the lookup above, and for
 the generated help (K8). `char_queue` goes away: `gg` is a two-key entry.
 
-One behavior changes on purpose: a key with an extra modifier no longer
-falls through to a bare-key arm. Today `Alt-j` moves down because the guard
-only excludes Ctrl. After the change it does nothing, as `Alt-j` is not a key
-anyone bound. The edit-mode and dialog handlers are untouched.
+Behavior changes on purpose, all small:
+
+- A key with an extra modifier no longer falls through to a bare-key arm.
+  Today `Alt-j` moves down because the guard only excludes Ctrl; so do
+  `Shift-Down`, `Alt-Right`, `Ctrl-e` (edit), `Alt-1` (numeric prefix) and
+  `Alt-s`. After the change they do nothing.
+- A key that cannot continue a pending sequence is swallowed with it. Today
+  `g` then `j` moves down and leaves the `g` pending. After the change `gj`
+  is not a key and both are dropped.
+- A digit typed while keys are pending is part of the sequence, not a
+  numeric prefix.
+- `Shift-Tab` works. Terminals send it as `BackTab`, which no arm matched.
+
+The edit-mode and dialog handlers are untouched.
 
 ## Help
 
