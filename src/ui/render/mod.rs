@@ -63,6 +63,7 @@ impl<'ws> Workspace<'ws> {
                     } else {
                         None
                     },
+                    &ws.state.theme,
                 )
                 .with_selected(ws.book.location.clone())
                 .block(table_block);
@@ -108,11 +109,15 @@ impl<'widget, 'ws: 'widget> Widget for &'widget mut Workspace<'ws> {
                 .as_ref()
                 .map(|md| md.get_text())
                 .unwrap_or_else(|| Text::raw("Popup message here"));
-            let popup = dialog::Dialog::new(lines, "Help").scroll(self.state.dialog_scroll);
+            let popup = dialog::Dialog::new(lines, "Help", &self.state.theme).scroll(self.state.dialog_scroll);
             popup.render(area, buf);
         } else if self.state.modality() == &Modality::Quit {
             let popup =
-                dialog::Dialog::new(Text::raw("File is not yet saved. Save it first?"), "Quit")
+                dialog::Dialog::new(
+                    Text::raw("File is not yet saved. Save it first?"),
+                    "Quit",
+                    &self.state.theme,
+                )
                     .with_bottom_title("Y/N");
             popup.render(area, buf);
         } else {

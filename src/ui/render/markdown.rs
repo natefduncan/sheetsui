@@ -2,11 +2,12 @@ use std::collections::BTreeSet;
 
 use crossterm::event::KeyCode;
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::Widget,
 };
 
+use crate::ui::theme::{Slot, Theme};
 use pulldown_cmark::{Event, LinkType, Parser, Tag, TagEnd};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -24,6 +25,7 @@ enum MarkdownState {
     Strong,
     Emphasis,
     Code,
+    Link,
     List(ListState),
 }
 
@@ -43,16 +45,20 @@ enum ListType {
 
 impl Markdown {
     pub fn from_str(input: &str) -> Self {
+        Self::from_str_themed(input, &Theme::default())
+    }
+
+    pub fn from_str_themed(input: &str, theme: &Theme) -> Self {
         let mut me = Self {
             input: input.to_owned(),
             links: Default::default(),
             parsed_text: None,
         };
-        me.parse();
+        me.parse(theme);
         me
     }
 
-    fn parse(&mut self) {
+    fn parse(&mut self, theme: &Theme) {
         let input = self.input.clone();
         
         let parser = pulldown_cmark::TextMergeStream::new(Parser::new(&input));
@@ -78,8 +84,9 @@ impl Markdown {
                                 pulldown_cmark::HeadingLevel::H2 => {
                                     Style::default().add_modifier(Modifier::ITALIC)
                                 }
-                                _ => Style::default().fg(Color::Blue),
-                            };
+                                _ => Style::default(),
+                            }
+                            .patch(theme.get(Slot::Heading));
                             current_line = Line::styled("", heading_style);
                             state_stack.push(MarkdownState::Heading(*level));
                         }
@@ -158,6 +165,7 @@ impl Markdown {
                             id: _,
                         } => {
                             self.handle_link_tag(&tag);
+                            state_stack.push(MarkdownState::Link);
                         }
                         Tag::BlockQuote(_) => todo!(),
                         Tag::Strikethrough => todo!(),
@@ -184,7 +192,7 @@ impl Markdown {
                         TagEnd::Strong => {
                             state_stack.pop();
                         }
-                        TagEnd::Emphasis => {
+                        TagEnd::Emphasis | TagEnd::Link => {
                             state_stack.pop();
                         }
                         TagEnd::CodeBlock => {
@@ -231,6 +239,9 @@ impl Markdown {
                             }
                             MarkdownState::Emphasis => {
                                 style = style.add_modifier(Modifier::ITALIC);
+                            }
+                            MarkdownState::Link => {
+                                style = style.patch(theme.get(Slot::Link));
                             }
                             //MarkdownState::Code => {
                             //    style = style.fg(Color::Yellow);
@@ -340,6 +351,31 @@ impl Widget for Markdown {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn test_headings_use_the_heading_slot() {
+        let md = Markdown::from_str("# One\n\n## Two\n\n### Three\n");
+        let text = md.get_text();
+        let blue = Style::default().fg(ratatui::style::Color::Blue);
+        let heads: Vec<&Line> = text.lines.iter().filter(|l| l.width() > 0).collect();
+        assert_eq!(3, heads.len());
+        assert_eq!(Style::default().add_modifier(Modifier::BOLD).patch(blue), heads[0].style);
+        assert_eq!(Style::default().add_modifier(Modifier::ITALIC).patch(blue), heads[1].style);
+        assert_eq!(blue, heads[2].style);
+    }
+
+    #[test]
+    fn test_link_text_uses_the_link_slot() {
+        let md = Markdown::from_str("see [the docs](http://x) now");
+        let text = md.get_text();
+        let spans = &text.lines[0].spans;
+        let link = spans.iter().find(|s| s.content == "the docs").expect("link span");
+        assert_eq!(Style::default().add_modifier(Modifier::UNDERLINED), link.style);
+        let plain = spans.iter().find(|s| s.content == "see ").expect("plain span");
+        assert_eq!(Style::default(), plain.style);
+        let after = spans.iter().find(|s| s.content == " now").expect("after span");
+        assert_eq!(Style::default(), after.style);
+    }
+
     #[test]
     fn test_empty_markdown() {
         let md = Markdown::from_str("");

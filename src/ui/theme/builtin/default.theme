@@ -1,0 +1,9 @@
+style cell         fg white  bg #232136
+style header.even  fg white  bg #393D47  bold true  underline true
+style header.odd   fg black  bg #A5A9A0  bold true  underline true
+style cursor       fg white  bg #393D47
+style selection    fg black  bg lightblue
+style tab.active   reverse true
+style dialog       bg black
+style heading      fg blue
+style link         underline true

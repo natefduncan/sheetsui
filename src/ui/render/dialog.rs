@@ -1,8 +1,8 @@
+use crate::ui::theme::{Slot, Theme};
 use ratatui::{
     self,
     layout::{Constraint, Layout, Rect},
-    style::Style,
-    text::Text,
+    text::{Line, Text},
     widgets::{Block, Clear, Paragraph, Widget, Wrap},
 };
 
@@ -11,12 +11,14 @@ pub struct Dialog<'w> {
     title: &'w str,
     bottom_title: &'w str,
     scroll: (u16, u16),
+    theme: &'w Theme,
     // TODO(zaphar): Have a max margin?
 }
 
 impl<'w> Dialog<'w> {
-    pub fn new(content: Text<'w>, title: &'w str) -> Self {
+    pub fn new(content: Text<'w>, title: &'w str, theme: &'w Theme) -> Self {
         Self {
+            theme,
             content,
             title,
             bottom_title: "j,k or up,down to scroll",
@@ -72,14 +74,15 @@ impl<'w> Widget for Dialog<'w> {
 
         Clear.render(dialog_area, buf);
         let dialog_block = Block::bordered()
-            .title_top(self.title)
+            .title_top(Line::styled(self.title, self.theme.get(Slot::Title)))
             .title_bottom(self.bottom_title)
-            .style(Style::default().on_black());
+            .style(self.theme.get(Slot::Dialog))
+            .border_style(self.theme.get(Slot::DialogBorder));
         let dialog = Paragraph::new(self.content.clone())
             .wrap(Wrap::default())
             .scroll(self.scroll)
             .block(dialog_block)
-            .style(Style::default());
+            ;
         dialog.render(dialog_area, buf);
     }
 }

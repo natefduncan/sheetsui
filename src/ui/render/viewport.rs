@@ -2,13 +2,16 @@ use anyhow::Result;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Rect},
-    style::{Color, Stylize},
+    style::{Style, Stylize},
     text::{Line, Text},
     widgets::{Block, Cell, Row, StatefulWidget, Table, Widget},
 };
 
 use super::{Address, Book, RangeSelection};
-use crate::book;
+use crate::{
+    book,
+    ui::theme::{color::parse_workbook_color, Slot, Theme},
+};
 
 /// A visible column to show in our Viewport.
 #[derive(Clone, Debug)]
@@ -34,6 +37,7 @@ pub struct Viewport<'ws> {
     book: &'ws Book,
     range_selection: Option<&'ws RangeSelection>,
     block: Option<Block<'ws>>,
+    theme: &'ws Theme,
 }
 
 pub(crate) const COLNAMES: [&str; 26] = [
@@ -42,8 +46,13 @@ pub(crate) const COLNAMES: [&str; 26] = [
 ];
 
 impl<'ws> Viewport<'ws> {
-    pub fn new(book: &'ws Book, app_state: Option<&'ws RangeSelection>) -> Self {
+    pub fn new(
+        book: &'ws Book,
+        app_state: Option<&'ws RangeSelection>,
+        theme: &'ws Theme,
+    ) -> Self {
         Self {
+            theme,
             book,
             range_selection: app_state,
             selected: Default::default(),
@@ -145,7 +154,8 @@ impl<'ws> Viewport<'ws> {
             visible_rows
                 .into_iter()
                 .map(|ri| {
-                    let mut cells = vec![Cell::new(Text::from(ri.to_string()))];
+                    let mut cells = vec![Cell::new(Text::from(ri.to_string()))
+                        .style(self.theme.get(Slot::HeaderRow))];
                     cells.extend(visible_columns.iter().map(
                         |VisibleColumn { idx: ci, length: _ }| {
                             let content = self
@@ -168,23 +178,21 @@ impl<'ws> Viewport<'ws> {
             .collect();
         let end_idx = visible_columns.last().unwrap().idx;
         let mut header = Vec::with_capacity(constraints.len());
-        header.push(Cell::new(""));
+        header.push(Cell::new("").style(self.theme.get(Slot::HeaderRow)));
         header.extend((state.prev_corner.col..=end_idx).map(|i| {
             let count = if i == 26 { 1 } else { (i / 26) + 1 };
             let even = i % 2 == 0;
             Cell::new(Line::raw(COLNAMES[(i - 1) % 26].repeat(count)).centered())
-                .bg(if even {
-                    Color::Rgb(57, 61, 71)
+                .style(self.theme.get(if even {
+                    Slot::HeaderEven
                 } else {
-                    Color::Rgb(165, 169, 160)
-                })
-                .fg(if even { Color::White } else { Color::Black })
-                .bold()
+                    Slot::HeaderOdd
+                }))
         }));
         let mut col_constraints = vec![Constraint::Length(5)];
         col_constraints.extend(constraints);
         Ok(Table::new(rows, col_constraints)
-            .header(Row::new(header).underlined())
+            .header(Row::new(header))
             .column_spacing(0)
             .flex(Flex::Start))
     }
@@ -213,31 +221,34 @@ impl<'ws> Viewport<'ws> {
         style: &ironcalc::base::types::Style,
         ri: usize,
         ci: usize,
-        mut cell: Cell<'widget>,
+        cell: Cell<'widget>,
     ) -> Cell<'widget> {
-        let theme = &self.book.model.get_model().workbook.theme;
-        let bg_color = map_color(
-            style_color_hex(&style.fill.color, theme).as_ref(),
-            Color::Rgb(35, 33, 54),
-        );
-        let fg_color = map_color(
-            style_color_hex(&style.font.color, theme).as_ref(),
-            Color::White,
-        );
+        let workbook_theme = &self.book.model.get_model().workbook.theme;
+        let base = self.theme.get(Slot::Cell);
+        let file_color = |color: &ironcalc::base::types::Color| {
+            style_color_hex(color, workbook_theme).and_then(|hex| parse_workbook_color(&hex))
+        };
+        let colors = Style {
+            fg: file_color(&style.font.color).or(base.fg),
+            bg: file_color(&style.fill.color).or(base.bg),
+            ..Style::default()
+        };
+        // NOTE: while a range is being selected, cells outside it get no colors.
+        // Stage 4 of the theme work fixes this.
+        let mut style = Style::default();
         if let Some((start, end)) = &self.range_selection.and_then(|r| r.get_range()) {
             if ri >= start.row && ri <= end.row && ci >= start.col && ci <= end.col {
                 // This is a selected range
-                cell = cell.fg(Color::Black).bg(Color::LightBlue)
+                style = self.theme.get(Slot::Selection);
             }
         } else {
-            cell = cell.bg(bg_color).fg(fg_color);
+            style = base.patch(colors);
         }
-        cell = match (self.book.location.row == ri, self.book.location.col == ci) {
-            (true, true) => cell.fg(Color::White).bg(Color::Rgb(57, 61, 71)),
-            // TODO(zaphar): Support ironcalc style options
-            _ => cell,
-        };
-        cell
+        // TODO(zaphar): Support ironcalc style options
+        if self.book.location.row == ri && self.book.location.col == ci {
+            style = style.patch(self.theme.get(Slot::Cursor));
+        }
+        cell.style(style)
     }
 }
 
@@ -253,49 +264,13 @@ fn style_color_hex(
     }
 }
 
-pub(crate) fn map_color(color: Option<&String>, otherwise: Color) -> Color {
+#[cfg(test)]
+pub(crate) fn map_color(
+    color: Option<&String>,
+    otherwise: ratatui::style::Color,
+) -> ratatui::style::Color {
     color
-        .map(|s| match s.to_lowercase().as_str() {
-            "red" => Color::Red,
-            "blue" => Color::Blue,
-            "green" => Color::Green,
-            "magenta" => Color::Magenta,
-            "cyan" => Color::Cyan,
-            "white" => Color::White,
-            "yellow" => Color::Yellow,
-            "black" => Color::Black,
-            "gray" | "grey" => Color::Gray,
-            "lightred" => Color::LightRed,
-            "lightblue" => Color::LightBlue,
-            "lightgreen" => Color::LightGreen,
-            "lightmagenta" => Color::LightMagenta,
-            "lightcyan" => Color::LightCyan,
-            "lightyellow" => Color::LightYellow,
-            "darkgrey" | "darkgray" => Color::DarkGray,
-            candidate => {
-                // TODO(jeremy): Should we support more syntaxes than hex string?
-                // hsl(...) ??
-                if candidate.starts_with("#") {
-                    if let Ok(rgb) = colorsys::Rgb::from_hex_str(candidate) {
-                        // Note that the colorsys rgb model clamps the f64 values to no more
-                        // than 255.0 so the below casts are safe.
-                        Color::Rgb(rgb.red() as u8, rgb.green() as u8, rgb.blue() as u8)
-                    } else {
-                        otherwise
-                    }
-                } else if candidate.starts_with("rgb(") {
-                    if let Ok(rgb) = <colorsys::Rgb as std::str::FromStr>::from_str(candidate) {
-                        // Note that the colorsys rgb model clamps the f64 values to no more
-                        // than 255.0 so the below casts are safe.
-                        Color::Rgb(rgb.red() as u8, rgb.green() as u8, rgb.blue() as u8)
-                    } else {
-                        otherwise
-                    }
-                } else {
-                    otherwise
-                }
-            }
-        })
+        .and_then(|s| parse_workbook_color(s))
         .unwrap_or(otherwise)
 }
 

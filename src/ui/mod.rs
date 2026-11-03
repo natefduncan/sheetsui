@@ -23,11 +23,13 @@ mod cmd;
 mod help;
 mod history;
 pub mod render;
+pub mod theme;
 #[cfg(test)]
 mod test;
 
 use cmd::{Cmd, CmdSortKey};
 pub use history::CommandHistory;
+use theme::Theme;
 use render::{markdown::Markdown, viewport::ViewportState};
 
 /// Default file name used when creating a new empty workbook.
@@ -92,6 +94,7 @@ pub struct AppState<'ws> {
     pub char_queue: Vec<char>,
     pub range_select: RangeSelection,
     pub dialog_scroll: u16,
+    pub theme: Theme,
     dirty: bool,
     popup: Option<Markdown>,
     clipboard: Option<ClipboardContents>,
@@ -108,6 +111,7 @@ impl<'ws> Default for AppState<'ws> {
             char_queue: Default::default(),
             range_select: Default::default(),
             dialog_scroll: 0,
+            theme: Theme::default(),
             dirty: false,
             popup: Default::default(),
             clipboard: Default::default(),
@@ -351,11 +355,11 @@ impl<'ws> Workspace<'ws> {
         // Ideally we would also render the markdown content properly.
         // https://github.com/zaphar/sheetsui/issues/22
         match self.state.modality() {
-            Modality::Navigate => help::to_widget("navigate"),
-            Modality::CellEdit => help::to_widget("edit"),
-            Modality::Command => help::to_widget("command"),
-            Modality::RangeSelect => help::to_widget("visual"),
-            _ => help::to_widget(""),
+            Modality::Navigate => help::to_widget("navigate", &self.state.theme),
+            Modality::CellEdit => help::to_widget("edit", &self.state.theme),
+            Modality::Command => help::to_widget("command", &self.state.theme),
+            Modality::RangeSelect => help::to_widget("visual", &self.state.theme),
+            _ => help::to_widget("", &self.state.theme),
         }
     }
 
@@ -486,7 +490,7 @@ impl<'ws> Workspace<'ws> {
                 Ok(None)
             }
             Ok(Some(Cmd::Help(maybe_topic))) => {
-                self.enter_dialog_mode(help::to_widget(maybe_topic.unwrap_or("")));
+                self.enter_dialog_mode(help::to_widget(maybe_topic.unwrap_or(""), &self.state.theme));
                 Ok(None)
             }
             Ok(Some(Cmd::Write(maybe_path))) => {
