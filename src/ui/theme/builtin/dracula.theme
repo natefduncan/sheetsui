@@ -1,0 +1,46 @@
+# Dracula. Colors from the Dracula palette, https://draculatheme.com
+# Source: https://github.com/dracula/dracula-theme (MIT License,
+# Copyright (c) 2023 Dracula Theme). License confirmed 2026-11-03.
+# Needs a truecolor terminal.
+palette bg       #282A36
+palette line     #44475A
+palette fg       #F8F8F2
+palette comment  #6272A4
+palette cyan     #8BE9FD
+palette green    #50FA7B
+palette orange   #FFB86C
+palette pink     #FF79C6
+palette purple   #BD93F9
+palette red      #FF5555
+palette yellow   #F1FA8C
+
+style cell          fg fg      bg bg
+style cell.number   fg purple
+style cell.string   fg green
+style cell.boolean  fg orange
+style cell.date     fg cyan
+style cell.negative fg red
+style cell.error    fg red     bold true
+
+style header.even   fg fg      bg line     bold true  underline true
+style header.odd    fg fg      bg comment  bold true  underline true
+style header.row    fg fg      bg line     bold true
+style cursor        fg bg      bg pink
+style selection     fg fg      bg comment
+
+style border        fg comment
+style title         fg purple  bold true
+style tab           fg comment
+style tab.active    fg bg      bg purple   bold true
+
+style status        fg cyan
+style command       fg fg      bg line
+style edit          fg fg      bg bg
+style info          fg green
+style error         fg red     bold true
+
+style dialog        fg fg      bg bg
+style dialog.border fg purple
+style heading       fg pink    bold true
+style link          fg cyan    underline true
+style hint          fg comment

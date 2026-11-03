@@ -16,6 +16,7 @@ Options:
   -l, --locale-name <LOCALE_NAME>      [default: en]
   -t, --timezone-name <TIMEZONE_NAME>  [default: America/New_York]
       --log-input <LOG_INPUT>
+      --theme <THEME>                  A theme name or a path to a theme file
   -h, --help                           Print help
   -V, --version                        Print version
 ```
@@ -53,3 +54,7 @@ get some context sensitive help.
 * [Edit](./edit.md)
 * [Visual](./visual.md)
 * [Command](./command.md)
+
+### Appearance
+
+* [Themes](./themes.md)

@@ -119,10 +119,22 @@ fn list_has_builtins_and_user_themes_sorted() {
         listed,
         vec![
             ("default".to_owned(), Source::Builtin),
+            ("dracula".to_owned(), Source::Builtin),
             ("light".to_owned(), Source::User),
             ("mine".to_owned(), Source::User),
+            ("papercolor-dark".to_owned(), Source::Builtin),
             ("terminal".to_owned(), Source::Builtin),
         ]
     );
-    assert_eq!(3, list(None).len());
+    assert_eq!(BUILTIN.len(), list(None).len());
+}
+
+#[test]
+fn palette_themes_set_every_slot() {
+    for name in ["dracula", "papercolor-dark"] {
+        let (theme, _) = load(name, None).unwrap();
+        for slot in Slot::ALL {
+            assert_ne!(ratatui::style::Style::default(), theme.get(*slot), "{name}: {slot}");
+        }
+    }
 }

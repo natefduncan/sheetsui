@@ -21,3 +21,4 @@ To get help on each modality in command mode `:` type
 * `help edit`
 * `help command`
 * `help visual` 
+* `help themes`

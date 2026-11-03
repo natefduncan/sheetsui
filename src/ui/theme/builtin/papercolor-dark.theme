@@ -1,0 +1,48 @@
+# PaperColor, dark variant. Colors from the PaperColor dark palette.
+# Source: https://github.com/NLKNguyen/papercolor-theme (MIT License,
+# Copyright (c) 2015-2020 Nikyle Nguyen). License confirmed 2026-11-03.
+# Needs a truecolor terminal.
+palette bg       #1C1C1C
+palette line     #303030
+palette visual   #585858
+palette fg       #D0D0D0
+palette comment  #808080
+palette red      #AF005F
+palette green    #5FAF00
+palette yellow   #D7AF5F
+palette blue     #5FAFD7
+palette purple   #AF87D7
+palette aqua     #00AFAF
+palette orange   #FF8700
+palette pink     #D7005F
+
+style cell          fg fg      bg bg
+style cell.number   fg blue
+style cell.string   fg green
+style cell.boolean  fg orange
+style cell.date     fg purple
+style cell.negative fg pink
+style cell.error    fg pink    bold true
+
+style header.even   fg fg      bg line     bold true  underline true
+style header.odd    fg fg      bg visual   bold true  underline true
+style header.row    fg fg      bg line     bold true
+style cursor        fg bg      bg yellow
+style selection     fg fg      bg visual
+
+style border        fg comment
+style title         fg blue    bold true
+style tab           fg comment
+style tab.active    fg bg      bg blue     bold true
+
+style status        fg aqua
+style command       fg fg      bg line
+style edit          fg fg      bg bg
+style info          fg green
+style error         fg pink    bold true
+
+style dialog        fg fg      bg line
+style dialog.border fg blue
+style heading       fg yellow  bold true
+style link          fg aqua    underline true
+style hint          fg comment

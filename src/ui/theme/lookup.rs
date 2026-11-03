@@ -10,6 +10,8 @@ pub const BUILTIN: &[(&str, &str)] = &[
     ("default", include_str!("builtin/default.theme")),
     ("light", include_str!("builtin/light.theme")),
     ("terminal", include_str!("builtin/terminal.theme")),
+    ("dracula", include_str!("builtin/dracula.theme")),
+    ("papercolor-dark", include_str!("builtin/papercolor-dark.theme")),
 ];
 
 /// Where a listed theme comes from.
