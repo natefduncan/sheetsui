@@ -1,7 +1,8 @@
-//! The state of `/` search: the last pattern, compiled once, and its
-//! direction. See `planning/search-design.md`.
+//! The state of `/` search: the last pattern, compiled once, its
+//! direction, and the `incsearch` preview. See `planning/search-design.md`.
 use regex::{Regex, RegexBuilder};
 
+use super::{render::viewport::ViewportState, Address};
 use crate::book::search::Direction;
 
 impl Direction {
@@ -36,6 +37,22 @@ pub struct SearchState {
     /// Whether the last search's matches are drawn highlighted. A search
     /// turns it on and `:noh` off; the `hlsearch` option can still hide it.
     pub highlight: bool,
+    /// While the prompt is open with `incsearch`: what to put back on Esc,
+    /// and what the prompt matches so far.
+    pub preview: Option<Preview>,
+}
+
+/// The `incsearch` preview of an open prompt.
+#[derive(Debug)]
+pub struct Preview {
+    /// The cursor when the prompt opened. Each key searches from here.
+    pub start: Address,
+    /// The scroll position when the prompt opened.
+    pub view: ViewportState,
+    /// The last pattern typed that compiled, if the prompt is not empty. A
+    /// pattern that does not compile yet, like `a(`, keeps the one before
+    /// so the preview does not flicker while typing.
+    pub matcher: Option<Regex>,
 }
 
 #[derive(Debug)]
@@ -86,6 +103,12 @@ impl SearchState {
         });
         Ok(&last.regex)
     }
+}
+
+/// Compiles a pattern without making it the last search, for the preview.
+pub fn compile(pattern: &str, case: CaseOptions) -> Result<Regex, String> {
+    let (body, ignore_case) = case_rule(pattern, case);
+    build(&body, ignore_case)
 }
 
 /// The pattern without its `\c` and `\C` atoms, and whether it ignores

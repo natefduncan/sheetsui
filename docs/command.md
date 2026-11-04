@@ -116,6 +116,10 @@ The options are:
 * `hlsearch` (`hls`), on or off, default on. The cells that match the last
   search are highlighted. `nohlsearch` hides the highlight until the next
   search; `set hls` shows it again.
+* `incsearch` (`is`), on or off, default on. While you type a `/` or `?`
+  pattern, the cursor jumps to the first match and the matches are
+  highlighted. `Esc` puts the cursor back. See
+  [Navigation](./navigation.md#search).
 
 `\c` and `\C` in a pattern beat `ignorecase` and `smartcase`. See
 [Navigation](./navigation.md#search).

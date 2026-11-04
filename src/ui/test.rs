@@ -3241,11 +3241,12 @@ fn at(ws: &Workspace) -> (usize, usize) {
 #[test]
 fn test_slash_opens_the_search_prompt() {
     let mut ws = search_workspace();
+    run_command(&mut ws, "set noincsearch");
     script().char('/').run(&mut ws).expect("run");
     assert_eq!(Some(&Modality::Search), ws.state.modality_stack.last());
     script().chars("x").run(&mut ws).expect("run");
     assert_eq!("x", ws.state.search_prompt.value());
-    // The cursor does not move until Enter.
+    // Without `incsearch` the cursor does not move until Enter.
     assert_eq!((1, 1), at(&ws));
 }
 
@@ -3554,7 +3555,7 @@ fn test_set_shows_and_changes_wrapscan() {
     assert!(!ws.state.options.wrapscan());
     run_command(&mut ws, "set");
     assert_eq!(
-        Some("nowrapscan  noignorecase  nosmartcase  searchin=value  hlsearch".to_owned()),
+        Some("nowrapscan  noignorecase  nosmartcase  searchin=value  hlsearch  incsearch".to_owned()),
         last_message(&ws)
     );
     run_command(&mut ws, "set ws!");
@@ -3821,4 +3822,129 @@ fn test_setting_hlsearch_undoes_noh() {
     run_command(&mut ws, "noh");
     run_command(&mut ws, "set ic");
     assert_eq!(None, highlighted(&mut ws));
+}
+
+// ---------------------------------------------------------------------------
+// Search: incsearch
+// ---------------------------------------------------------------------------
+
+fn backspace() -> Event {
+    construct_key_event(KeyCode::Backspace)
+}
+
+#[test]
+fn test_incsearch_previews_each_key() {
+    let mut ws = search_workspace();
+    assert!(ws.state.options.incsearch());
+    script().char('/').char('y').run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Search), ws.state.modality_stack.last());
+    assert_eq!((1, 2), at(&ws));
+    assert_eq!(Some("y".to_owned()), highlighted(&mut ws));
+    // The edit box follows the cursor.
+    assert_eq!(vec!["y".to_owned()], ws.text_area.lines());
+    // Each key searches again from where the prompt opened.
+    script().event(backspace()).char('z').run(&mut ws).expect("run");
+    assert_eq!((2, 1), at(&ws));
+    assert_eq!(Some("z".to_owned()), highlighted(&mut ws));
+    // No match goes back to the start, quietly.
+    script().char('q').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(None, last_message(&ws));
+    // An empty prompt goes back to the start too, with no highlight.
+    script().event(backspace()).event(backspace()).run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(None, highlighted(&mut ws));
+}
+
+#[test]
+fn test_incsearch_backward_previews_without_a_wrap_message() {
+    let mut ws = search_workspace();
+    script().char('?').char('x').run(&mut ws).expect("run");
+    assert_eq!((3, 1), at(&ws));
+    assert_eq!(None, last_message(&ws));
+}
+
+#[test]
+fn test_incsearch_enter_keeps_the_previewed_match() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    // Not the match after the previewed one.
+    assert_eq!((1, 3), at(&ws));
+    assert_eq!(Some("x".to_owned()), highlighted(&mut ws));
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    // A wrap still says so on Enter.
+    script().char('/').chars("y").enter().run(&mut ws).expect("run");
+    assert_eq!((3, 2), at(&ws));
+    script().char('?').chars("z").enter().run(&mut ws).expect("run");
+    assert_eq!((2, 3), at(&ws));
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!((3, 1), at(&ws));
+    script().char('/').chars("y").enter().run(&mut ws).expect("run");
+    assert_eq!((3, 2), at(&ws));
+    script().char('/').chars("z").enter().run(&mut ws).expect("run");
+    assert_eq!((2, 1), at(&ws));
+    assert_eq!(
+        Some("search hit BOTTOM, continuing at TOP".to_owned()),
+        last_message(&ws)
+    );
+}
+
+#[test]
+fn test_incsearch_esc_restores_the_cursor_and_highlight() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    script().char('/').chars("z").run(&mut ws).expect("run");
+    assert_eq!((2, 1), at(&ws));
+    assert_eq!(Some("z".to_owned()), highlighted(&mut ws));
+    script().esc().run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!((1, 3), at(&ws));
+    assert_eq!(vec!["x".to_owned()], ws.text_area.lines());
+    assert_eq!(Some("x".to_owned()), highlighted(&mut ws));
+    // `n` still repeats the search before the prompt.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    // After `:noh` the preview highlights, and Esc hides it again.
+    run_command(&mut ws, "noh");
+    script().char('/').chars("y").run(&mut ws).expect("run");
+    assert_eq!(Some("y".to_owned()), highlighted(&mut ws));
+    script().esc().run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    assert_eq!(None, highlighted(&mut ws));
+}
+
+#[test]
+fn test_incsearch_invalid_partial_pattern_is_silent_until_enter() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x(").run(&mut ws).expect("run");
+    // The last good preview stays: no error, no jump back.
+    assert_eq!((1, 3), at(&ws));
+    assert_eq!(None, last_message(&ws));
+    assert_eq!(Some("x".to_owned()), highlighted(&mut ws));
+    script().chars("|z)").run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    assert_eq!(Some("x(|z)".to_owned()), highlighted(&mut ws));
+    script().event(backspace()).enter().run(&mut ws).expect("run");
+    // Enter on an invalid pattern says so and leaves the cursor at the start.
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(Some("Invalid pattern: unclosed group".to_owned()), last_message(&ws));
+    assert_eq!(None, highlighted(&mut ws));
+}
+
+#[test]
+fn test_noincsearch_turns_the_preview_off() {
+    let mut ws = search_workspace();
+    run_command(&mut ws, "set nois");
+    assert!(!ws.state.options.incsearch());
+    script().char('/').chars("y").run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(None, highlighted(&mut ws));
+    script().enter().run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    run_command(&mut ws, "set is");
+    script().char('/').chars("z").run(&mut ws).expect("run");
+    assert_eq!((2, 1), at(&ws));
 }

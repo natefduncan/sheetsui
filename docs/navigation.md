@@ -67,6 +67,16 @@ backward). See [Options](./command.md#options). A pattern with no match says
 `E486: Pattern not found` and leaves the cursor where it is. `Esc` closes the
 prompt without searching.
 
+While you type, the cursor jumps to the first match of what is in the prompt so
+far, counted from where you opened it, and the matches are highlighted. With
+nothing to match yet, it stays where it started. `Enter` keeps the cell the
+preview found. `Esc` puts the cursor, the scroll position, and the highlight
+back as they were. A pattern that is not valid yet, like `a(` on the way to
+`a(b|c)`, says nothing and leaves the preview as it was; only `Enter` reports
+the error. `:set noincsearch` turns the preview off, so the cursor moves only
+on `Enter`. With `nohlsearch` the preview moves the cursor but highlights
+nothing. See [Options](./command.md#options).
+
 The pattern is a regular expression in the syntax of Rust's `regex` crate. It
 is close to vim's "very magic" `\v` mode: write `(a|b)`, not `\(a\|b\)`, `a+`,
 not `a\+`, and `\.` for a literal dot. A pattern that does not parse shows why

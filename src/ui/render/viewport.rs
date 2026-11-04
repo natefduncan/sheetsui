@@ -32,7 +32,7 @@ impl<'a> From<&'a VisibleColumn> for Constraint {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ViewportState {
     prev_corner: Address,
 }

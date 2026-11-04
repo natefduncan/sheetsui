@@ -50,6 +50,11 @@ pub const OPTIONS: &[Spec] = &[
         short: Some("hls"),
         kind: Kind::Bool(true),
     },
+    Spec {
+        name: "incsearch",
+        short: Some("is"),
+        kind: Kind::Bool(true),
+    },
 ];
 
 /// The current value of an option.
@@ -108,6 +113,11 @@ impl Options {
     /// Whether the cells that match the last search are highlighted.
     pub fn hlsearch(&self) -> bool {
         self.flag("hlsearch")
+    }
+
+    /// Whether the `/` and `?` prompt previews the search as it is typed.
+    pub fn incsearch(&self) -> bool {
+        self.flag("incsearch")
     }
 
     /// Which text of a cell a search matches.

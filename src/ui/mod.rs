@@ -595,6 +595,7 @@ impl<'ws> Workspace<'ws> {
             }
         }
         self.state.search_prompt.handle_key_event(key);
+        self.update_preview();
         Ok(None)
     }
 
@@ -1424,6 +1425,11 @@ impl<'ws> Workspace<'ws> {
     /// once the user presses Enter.
     fn enter_search_mode(&mut self, direction: Direction) {
         self.state.search.prompt = direction;
+        self.state.search.preview = self.state.options.incsearch().then(|| search::Preview {
+            start: self.book.location.clone(),
+            view: self.state.viewport_state.clone(),
+            matcher: None,
+        });
         self.state.modality_stack.push(Modality::Search);
         self.state.search_prompt.truncate();
         *self.state.search_prompt.status_mut() = Status::Pending;
@@ -1433,6 +1439,9 @@ impl<'ws> Workspace<'ws> {
     /// Enter in the `/` or `?` prompt: searches for the pattern in the
     /// prompt's direction. An empty pattern repeats the last one.
     fn exit_search_mode(&mut self) -> Result<Option<ExitCode>> {
+        // Search from where the prompt opened, so the preview's match is the
+        // one Enter finds, wrap message and all.
+        self.end_preview();
         let pattern = self.state.search_prompt.value().to_owned();
         self.state.search_prompt.blur();
         *self.state.search_prompt.status_mut() = Status::Done;
@@ -1452,12 +1461,65 @@ impl<'ws> Workspace<'ws> {
         Ok(None)
     }
 
-    /// Esc in the `/` prompt: leaves it without searching.
+    /// Esc in the `/` prompt: leaves it without searching, and puts the
+    /// cursor and highlight back as they were before the preview.
     fn cancel_search_mode(&mut self) -> Result<Option<ExitCode>> {
+        self.end_preview();
         self.state.search_prompt.blur();
         *self.state.search_prompt.status_mut() = Status::Aborted;
         self.state.pop_modality();
         Ok(None)
+    }
+
+    /// With `incsearch`, moves the cursor to the first match of what the
+    /// prompt holds, searching from where the prompt opened. Nothing to
+    /// match puts it back there. A pattern that does not compile yet is
+    /// skipped quietly: the preview stays as it was.
+    fn update_preview(&mut self) {
+        let case = self.case_options();
+        let within = self.state.options.searchin();
+        let wrapscan = self.state.options.wrapscan();
+        let direction = self.state.search.prompt;
+        let Some(preview) = self.state.search.preview.as_mut() else {
+            return;
+        };
+        let pattern = self.state.search_prompt.value();
+        preview.matcher = if pattern.is_empty() {
+            None
+        } else {
+            match search::compile(pattern, case) {
+                Ok(matcher) => Some(matcher),
+                Err(_) => return,
+            }
+        };
+        let start = &preview.start;
+        let target = match &preview.matcher {
+            Some(matcher) => {
+                match self.book.search(start.sheet, matcher, within, start, direction, wrapscan) {
+                    Ok(Some(hit)) => hit.address,
+                    _ => start.clone(),
+                }
+            }
+            None => start.clone(),
+        };
+        if target != self.book.location {
+            // `move_to` cannot fail; it only sets the row and column.
+            let _ = self.book.move_to(&target);
+            self.handle_movement_change();
+        }
+    }
+
+    /// Closes the `incsearch` preview, if there is one, and puts the cursor
+    /// and scroll position back where the prompt opened.
+    fn end_preview(&mut self) {
+        let Some(preview) = self.state.search.preview.take() else {
+            return;
+        };
+        self.state.viewport_state = preview.view;
+        if preview.start != self.book.location {
+            let _ = self.book.move_to(&preview.start);
+            self.handle_movement_change();
+        }
     }
 
     /// Moves to the `count`th next match of the last search, going in
@@ -1536,9 +1598,17 @@ impl<'ws> Workspace<'ws> {
     }
 
     /// The search to highlight and the text it matches: `None` when
-    /// `hlsearch` is off, after `:noh`, or before any search.
+    /// `hlsearch` is off, after `:noh`, or before any search. While the
+    /// `incsearch` preview has a pattern, it is the one highlighted.
     pub(crate) fn highlight_matcher(&mut self) -> Option<(regex::Regex, book::search::SearchIn)> {
-        if !self.state.options.hlsearch() || !self.state.search.highlight {
+        if !self.state.options.hlsearch() {
+            return None;
+        }
+        let within = self.state.options.searchin();
+        if let Some(matcher) = self.state.search.preview.as_ref().and_then(|p| p.matcher.as_ref()) {
+            return Some((matcher.clone(), within));
+        }
+        if !self.state.search.highlight {
             return None;
         }
         let case = self.case_options();
