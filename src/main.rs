@@ -51,6 +51,9 @@ fn run(terminal: &mut ratatui::DefaultTerminal, args: Args) -> anyhow::Result<Ex
     if let Some(path) = ui::CommandHistory::default_path() {
         ws.state.command_history.use_file(&path);
     }
+    if let Some(path) = ui::CommandHistory::search_path() {
+        ws.state.search_history.use_file(&path);
+    }
     ws.init_theme(args.theme.as_deref());
     ws.init_keys(args.keys.as_deref());
     let mut read_func: ReadFn = if let Some(log_path) = args.log_input {

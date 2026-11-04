@@ -64,6 +64,19 @@ same formula. `ignorecase` and `smartcase` apply as for `/`. The pattern is the
 last search afterwards, so `n` and `N` go on with it. Both take a count. On an
 empty cell they say `E348: No string under cursor`.
 
+In the `/` and `?` prompts, `Up` shows the previous pattern and `Down` the
+next one. If you type some text first, `Up` and `Down` show only the patterns
+that start with that text. `Down` past the newest pattern gives back the text
+you typed. With `incsearch` the cursor follows the pattern shown. Every
+pattern that you search for with `Enter` goes into the history, also one that
+does not parse, and so does the pattern that `*` or `#` builds. A search that
+you cancel with `Esc` does not. `/` and `?` share one history, apart from the
+command history: the last 100 patterns are kept in
+`$XDG_STATE_HOME/sheetui/search-history` (by default
+`~/.local/state/sheetui/search-history`), so they are still there when you
+start sheetui again. If that file cannot be read or written, the history is
+kept until you quit.
+
 `/` or `?` with no pattern, then `Enter`, searches for the last pattern again,
 in the new direction. With no last pattern it says
 `E35: No previous regular expression`, as do `n` and `N`.

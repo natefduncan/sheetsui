@@ -119,6 +119,8 @@ pub struct AppState<'ws> {
     pub viewport_state: ViewportState,
     pub command_state: TextState<'ws>,
     pub command_history: CommandHistory,
+    /// Patterns searched for with `/`, `?`, `*` and `#`.
+    pub search_history: CommandHistory,
     /// The text of the `/` prompt.
     pub search_prompt: TextState<'ws>,
     /// The last search, for `n`.
@@ -150,6 +152,7 @@ impl<'ws> Default for AppState<'ws> {
             viewport_state: Default::default(),
             command_state: Default::default(),
             command_history: Default::default(),
+            search_history: Default::default(),
             search_prompt: Default::default(),
             search: Default::default(),
             options: Default::default(),
@@ -591,7 +594,22 @@ impl<'ws> Workspace<'ws> {
             match key.code {
                 KeyCode::Enter => return self.exit_search_mode(),
                 KeyCode::Esc => return self.cancel_search_mode(),
-                _ => {}
+                KeyCode::Up => {
+                    let shown = self.state.search_prompt.value().to_owned();
+                    if let Some(text) = self.state.search_history.older(&shown) {
+                        self.set_search_text(text);
+                    }
+                    return Ok(None);
+                }
+                KeyCode::Down => {
+                    let shown = self.state.search_prompt.value().to_owned();
+                    if let Some(text) = self.state.search_history.newer(&shown) {
+                        self.set_search_text(text);
+                    }
+                    return Ok(None);
+                }
+                // An edit makes the text shown the prefix for the next Up.
+                _ => self.state.search_history.reset(),
             }
         }
         self.state.search_prompt.handle_key_event(key);
@@ -1442,8 +1460,16 @@ impl<'ws> Workspace<'ws> {
         });
         self.state.modality_stack.push(Modality::Search);
         self.state.search_prompt.truncate();
+        self.state.search_history.reset();
         *self.state.search_prompt.status_mut() = Status::Pending;
         self.state.search_prompt.focus();
+    }
+
+    /// Puts a pattern from the search history in the prompt, and previews it.
+    fn set_search_text(&mut self, text: String) {
+        *self.state.search_prompt.value_mut() = text;
+        self.state.search_prompt.move_end();
+        self.update_preview();
     }
 
     /// Enter in the `/` or `?` prompt: searches for the pattern in the
@@ -1457,6 +1483,8 @@ impl<'ws> Workspace<'ws> {
         *self.state.search_prompt.status_mut() = Status::Done;
         self.state.pop_modality();
         if !pattern.is_empty() {
+            // Record a pattern that fails too, so a typo can be fixed with Up.
+            self.state.search_history.add(&pattern);
             let case = self.case_options();
             if let Err(msg) = self.state.search.set_pattern(&pattern, case) {
                 self.set_message(MessageLevel::Error, msg);
@@ -1624,6 +1652,7 @@ impl<'ws> Workspace<'ws> {
             return;
         }
         let pattern = format!("^{}$", regex::escape(&text));
+        self.state.search_history.add(&pattern);
         let case = self.case_options();
         if let Err(msg) = self.state.search.set_pattern(&pattern, case) {
             self.set_message(MessageLevel::Error, msg);

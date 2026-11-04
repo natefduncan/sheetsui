@@ -1,4 +1,4 @@
-//! History for command mode.
+//! History for command mode and the `/` and `?` search prompts.
 //!
 //! Storage and search come from rustyline's history module. Up and Down
 //! browse the entries that start with the text typed before the first Up,
@@ -53,14 +53,16 @@ impl Default for CommandHistory {
 }
 
 impl CommandHistory {
-    /// The default history file: `$XDG_STATE_HOME/sheetui/history`, else
-    /// `$HOME/.local/state/sheetui/history`.
+    /// The default command history file: `$XDG_STATE_HOME/sheetui/history`,
+    /// else `$HOME/.local/state/sheetui/history`.
     pub fn default_path() -> Option<PathBuf> {
-        let state = match std::env::var_os("XDG_STATE_HOME") {
-            Some(dir) if !dir.is_empty() => PathBuf::from(dir),
-            _ => PathBuf::from(std::env::var_os("HOME")?).join(".local/state"),
-        };
-        Some(state.join("sheetui").join("history"))
+        state_file("history")
+    }
+
+    /// The default search history file, beside the command history:
+    /// `$XDG_STATE_HOME/sheetui/search-history`.
+    pub fn search_path() -> Option<PathBuf> {
+        state_file("search-history")
     }
 
     /// Keep the history in `path`, and load what it holds now.
@@ -153,6 +155,16 @@ impl CommandHistory {
     }
 }
 
+/// `name` in sheetui's state directory: `$XDG_STATE_HOME/sheetui`, else
+/// `$HOME/.local/state/sheetui`.
+fn state_file(name: &str) -> Option<PathBuf> {
+    let state = match std::env::var_os("XDG_STATE_HOME") {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => PathBuf::from(std::env::var_os("HOME")?).join(".local/state"),
+    };
+    Some(state.join("sheetui").join(name))
+}
+
 #[cfg(test)]
 mod test {
     use super::CommandHistory;
@@ -224,6 +236,18 @@ mod test {
             oldest = Some(entry);
         }
         assert_eq!(oldest.as_deref(), Some("c5"));
+    }
+
+    #[test]
+    fn test_search_history_file_is_beside_the_command_history() {
+        let (Some(cmd), Some(search)) = (CommandHistory::default_path(), CommandHistory::search_path())
+        else {
+            // No HOME and no XDG_STATE_HOME: both stay in memory.
+            return;
+        };
+        assert_eq!(cmd.parent(), search.parent());
+        assert_eq!(search.file_name().and_then(|n| n.to_str()), Some("search-history"));
+        assert_ne!(cmd, search);
     }
 
     #[test]

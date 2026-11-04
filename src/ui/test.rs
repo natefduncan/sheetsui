@@ -4109,3 +4109,104 @@ fn test_noincsearch_turns_the_preview_off() {
     script().char('/').chars("z").run(&mut ws).expect("run");
     assert_eq!((2, 1), at(&ws));
 }
+
+// ---------------------------------------------------------------------------
+// Search: history
+// ---------------------------------------------------------------------------
+
+fn search_prompt_text(ws: &Workspace) -> String {
+    use tui_prompts::State;
+    ws.state.search_prompt.value().to_owned()
+}
+
+#[test]
+fn test_search_history_up_and_down() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    script().char('?').chars("y").enter().run(&mut ws).expect("run");
+    script().char('/').up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "y");
+    script().up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "x");
+    script().up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "x");
+    script().down().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "y");
+    script().down().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "");
+}
+
+#[test]
+fn test_search_history_prefix_match_and_draft_restore() {
+    let mut ws = search_workspace();
+    for pattern in ["x|y", "z", "x$"] {
+        script().char('/').chars(pattern).enter().run(&mut ws).expect("run");
+    }
+    script().char('/').chars("x").up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "x$");
+    script().up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "x|y");
+    script().down().down().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "x");
+}
+
+#[test]
+fn test_search_history_is_separate_from_command_history() {
+    let mut ws = search_workspace();
+    run_command(&mut ws, "set ic");
+    script().char('/').chars("z").enter().run(&mut ws).expect("run");
+    assert_eq!(ws.state.command_history.older("").as_deref(), Some("set ic"));
+    assert_eq!(ws.state.command_history.older("set ic"), None);
+    script().char('/').up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "z");
+    script().up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "z");
+}
+
+#[test]
+fn test_search_history_skips_cancelled_and_empty_patterns() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    script().char('/').chars("q").esc().run(&mut ws).expect("run");
+    // An empty pattern repeats the last search but adds nothing.
+    script().char('/').enter().run(&mut ws).expect("run");
+    script().char('/').up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "x");
+    script().up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "x");
+}
+
+#[test]
+fn test_search_history_records_an_invalid_pattern() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x(").enter().run(&mut ws).expect("run");
+    script().char('/').up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "x(");
+}
+
+#[test]
+fn test_search_history_recall_moves_the_preview_and_enter_searches() {
+    let mut ws = search_workspace();
+    script().char('/').chars("z").enter().run(&mut ws).expect("run");
+    assert_eq!((2, 1), at(&ws));
+    script().char('?').chars("y").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    script().char('/').up().up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "z");
+    // The preview follows the recalled pattern.
+    assert_eq!((2, 1), at(&ws));
+    assert_eq!(Some("z".to_owned()), highlighted(&mut ws));
+    script().enter().run(&mut ws).expect("run");
+    assert_eq!((2, 1), at(&ws));
+}
+
+#[test]
+fn test_star_and_hash_patterns_go_into_the_search_history() {
+    let mut ws = star_workspace();
+    script().char('*').run(&mut ws).expect("run");
+    script().char('/').up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "^Paid$");
+    script().esc().char('h').char('#').run(&mut ws).expect("run");
+    script().char('/').up().run(&mut ws).expect("run");
+    assert_eq!(search_prompt_text(&ws), "^paid$");
+}

@@ -19,7 +19,8 @@ that fails, so you can fix a typo with `Up`. A command that you cancel with
 `Esc` does not. The history keeps the last 100 commands in
 `$XDG_STATE_HOME/sheetui/history` (by default
 `~/.local/state/sheetui/history`), so it is still there when you start
-sheetui again.
+sheetui again. Search patterns have a history of their own; see
+[Search](./navigation.md#search).
 
 ## Commands
 
