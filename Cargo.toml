@@ -25,6 +25,7 @@ arboard = { version = "3.5.0", features = ["wayland-data-control"] }
 htmf = "0.2.0"
 time = "0.3.44"
 rustyline = { version = "18.0.1", default-features = false, features = ["with-file-history"] }
+regex = "1"
 
 [dev-dependencies]
 serial_test = "3"

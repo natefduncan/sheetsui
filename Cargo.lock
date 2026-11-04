@@ -2314,6 +2314,7 @@ dependencies = [
  "pulldown-cmark",
  "ratatui",
  "ratatui-textarea",
+ "regex",
  "rustyline",
  "serde_json",
  "serial_test",

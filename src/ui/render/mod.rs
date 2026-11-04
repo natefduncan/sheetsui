@@ -92,6 +92,18 @@ impl<'ws> Workspace<'ws> {
                 buf.set_style(rect, ws.state.theme.get(Slot::Command));
             }));
         }
+        if self.state.modality() == &Modality::Search {
+            cs.push(Constraint::Max(1));
+            rs.push(Box::new(|rect: Rect, buf: &mut Buffer, ws: &mut Self| {
+                StatefulWidget::render(
+                    TextPrompt::from("/"),
+                    rect,
+                    buf,
+                    &mut ws.state.search_prompt,
+                );
+                buf.set_style(rect, ws.state.theme.get(Slot::Command));
+            }));
+        }
         let rects: Vec<Rect> = Vec::from(
             Layout::vertical(cs)
                 .vertical_margin(2)
@@ -164,6 +176,7 @@ impl<'widget, 'ws: 'widget> Widget for &'widget mut Workspace<'ws> {
                         Modality::Navigate => "navigate",
                         Modality::CellEdit => "edit",
                         Modality::Command => "command",
+                        Modality::Search => "search",
                         Modality::Dialog => "",
                         Modality::RangeSelect => "range-copy",
                         Modality::Quit => "",
@@ -191,7 +204,9 @@ pub fn draw(frame: &mut Frame, ws: &mut Workspace) {
     frame.render_widget(&mut *ws, frame.area());
     // The prompt is drawn into a buffer, so only the frame can show the
     // terminal cursor. Rendering the prompt set its position.
-    if ws.state.modality() == &Modality::Command {
-        frame.set_cursor_position(ws.state.command_state.cursor());
+    match ws.state.modality() {
+        Modality::Command => frame.set_cursor_position(ws.state.command_state.cursor()),
+        Modality::Search => frame.set_cursor_position(ws.state.search_prompt.cursor()),
+        _ => {}
     }
 }

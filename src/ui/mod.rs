@@ -5,7 +5,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::book::{self, AddressRange, Book, SortKey};
+use crate::book::{self, search::Direction, AddressRange, Book, SortKey};
 
 use anyhow::{anyhow, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -26,6 +26,7 @@ mod history;
 #[allow(dead_code)]
 pub mod keys;
 pub mod render;
+mod search;
 pub mod theme;
 #[cfg(test)]
 mod test;
@@ -37,6 +38,7 @@ use keys::{
     Key,
 };
 pub use history::CommandHistory;
+use search::SearchState;
 use theme::{lookup, parse::Warning, Slot, Theme};
 use render::{markdown::Markdown, viewport::ViewportState};
 
@@ -49,6 +51,8 @@ pub enum Modality {
     Navigate,
     CellEdit,
     Command,
+    /// The `/` prompt.
+    Search,
     Dialog,
     RangeSelect,
     Quit,
@@ -113,6 +117,10 @@ pub struct AppState<'ws> {
     pub viewport_state: ViewportState,
     pub command_state: TextState<'ws>,
     pub command_history: CommandHistory,
+    /// The text of the `/` prompt.
+    pub search_prompt: TextState<'ws>,
+    /// The last search, for `n`.
+    pub search: SearchState,
     pub numeric_prefix: Vec<char>,
     /// Keys typed so far that are the start of a longer key sequence.
     pub pending_keys: Vec<Key>,
@@ -138,6 +146,8 @@ impl<'ws> Default for AppState<'ws> {
             viewport_state: Default::default(),
             command_state: Default::default(),
             command_history: Default::default(),
+            search_prompt: Default::default(),
+            search: Default::default(),
             numeric_prefix: Default::default(),
             pending_keys: Default::default(),
             keymap: Default::default(),
@@ -371,6 +381,7 @@ impl<'ws> Workspace<'ws> {
             Modality::Navigate => self.handle_navigation_input(key),
             Modality::CellEdit => self.handle_edit_input(key),
             Modality::Command => self.handle_command_input(key),
+            Modality::Search => self.handle_search_input(key),
             Modality::Dialog => self.handle_dialog_input(key),
             Modality::RangeSelect => self.handle_range_select_input(key),
             Modality::Quit => self.handle_quit_dialog(key),
@@ -531,6 +542,7 @@ impl<'ws> Workspace<'ws> {
             Modality::Navigate => help::to_widget("navigate", &self.state.theme, &self.state.keymap),
             Modality::CellEdit => help::to_widget("edit", &self.state.theme, &self.state.keymap),
             Modality::Command => help::to_widget("command", &self.state.theme, &self.state.keymap),
+            Modality::Search => help::to_widget("navigate", &self.state.theme, &self.state.keymap),
             Modality::RangeSelect => help::to_widget("visual", &self.state.theme, &self.state.keymap),
             _ => help::to_widget("", &self.state.theme, &self.state.keymap),
         }
@@ -566,6 +578,18 @@ impl<'ws> Workspace<'ws> {
             }
         }
         self.state.command_state.handle_key_event(key);
+        Ok(None)
+    }
+
+    fn handle_search_input(&mut self, key: event::KeyEvent) -> Result<Option<ExitCode>> {
+        if key.kind == KeyEventKind::Press {
+            match key.code {
+                KeyCode::Enter => return self.exit_search_mode(),
+                KeyCode::Esc => return self.cancel_search_mode(),
+                _ => {}
+            }
+        }
+        self.state.search_prompt.handle_key_event(key);
         Ok(None)
     }
 
@@ -1244,6 +1268,14 @@ impl<'ws> Workspace<'ws> {
                 self.handle_movement_change();
                 self.enter_edit_mode();
             }
+            NavHandler::SearchForward => {
+                self.state.reset_n_prefix();
+                self.enter_search_mode(Direction::Forward);
+            }
+            NavHandler::SearchNext => {
+                self.state.reset_n_prefix();
+                self.search_next();
+            }
             NavHandler::Undo => {
                 self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> { ws.undo() })?;
             }
@@ -1351,6 +1383,75 @@ impl<'ws> Workspace<'ws> {
         self.state.command_history.reset();
         *self.state.command_state.status_mut() = Status::Pending;
         self.state.command_state.focus();
+    }
+
+    fn enter_search_mode(&mut self, direction: Direction) {
+        self.state.search.direction = direction;
+        self.state.modality_stack.push(Modality::Search);
+        self.state.search_prompt.truncate();
+        *self.state.search_prompt.status_mut() = Status::Pending;
+        self.state.search_prompt.focus();
+    }
+
+    /// Enter in the `/` prompt: searches for the pattern. An empty pattern
+    /// does nothing.
+    fn exit_search_mode(&mut self) -> Result<Option<ExitCode>> {
+        let pattern = self.state.search_prompt.value().to_owned();
+        self.state.search_prompt.blur();
+        *self.state.search_prompt.status_mut() = Status::Done;
+        self.state.pop_modality();
+        if pattern.is_empty() {
+            return Ok(None);
+        }
+        match self.state.search.set_pattern(&pattern) {
+            Ok(_) => self.search_next(),
+            Err(msg) => self.set_message(MessageLevel::Error, msg),
+        }
+        Ok(None)
+    }
+
+    /// Esc in the `/` prompt: leaves it without searching.
+    fn cancel_search_mode(&mut self) -> Result<Option<ExitCode>> {
+        self.state.search_prompt.blur();
+        *self.state.search_prompt.status_mut() = Status::Aborted;
+        self.state.pop_modality();
+        Ok(None)
+    }
+
+    /// Moves to the next match of the last search, in its direction. A miss
+    /// or a wrap is reported on the message line.
+    fn search_next(&mut self) {
+        let Some((pattern, matcher)) = self.state.search.last() else {
+            self.set_message(
+                MessageLevel::Error,
+                "E35: No previous regular expression".to_owned(),
+            );
+            return;
+        };
+        let direction = self.state.search.direction;
+        let from = self.book.location.clone();
+        let found = self
+            .book
+            .search(from.sheet, matcher, &from, direction, true);
+        match found {
+            Ok(Some(hit)) => {
+                // `move_to` cannot fail; it only sets the row and column.
+                let _ = self.book.move_to(&hit.address);
+                self.handle_movement_change();
+                if hit.wrapped {
+                    let text = match direction {
+                        Direction::Forward => "search hit BOTTOM, continuing at TOP",
+                        Direction::Backward => "search hit TOP, continuing at BOTTOM",
+                    };
+                    self.set_message(MessageLevel::Info, text.to_owned());
+                }
+            }
+            Ok(None) => {
+                let text = format!("E486: Pattern not found: {pattern}");
+                self.set_message(MessageLevel::Error, text);
+            }
+            Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
+        }
     }
 
     fn set_message(&mut self, level: MessageLevel, text: String) {

@@ -2,7 +2,7 @@ use ironcalc::base::{expressions::types::Area, worksheet::WorksheetDimension, Mo
 
 use crate::ui::Address;
 
-use super::{Book, FileFormat};
+use super::{search::Direction, Book, FileFormat};
 
 #[test]
 fn test_book_default() {
@@ -993,4 +993,152 @@ fn test_undo_back_to_the_save_point_is_not_a_change() {
     assert!(book.undo().expect("undo"));
     assert!(book.dirty, "the saved state can no longer be reached");
     std::fs::remove_file(&path).expect("clean up");
+}
+
+// -------------------------------------------------------------------------
+// Search
+// -------------------------------------------------------------------------
+
+fn re(pattern: &str) -> regex::Regex {
+    regex::Regex::new(pattern).expect("pattern")
+}
+
+/// The address and wrap flag of the next match, or `None`.
+fn find(
+    book: &Book,
+    pattern: &str,
+    from: (usize, usize),
+    direction: Direction,
+    wrapscan: bool,
+) -> Option<((usize, usize), bool)> {
+    book.search(0, &re(pattern), &phase2_addr(from.0, from.1), direction, wrapscan)
+        .expect("search")
+        .map(|hit| ((hit.address.row, hit.address.col), hit.wrapped))
+}
+
+#[test]
+fn test_search_forward_is_row_major() {
+    // x at A1, C1, B2, A3.
+    let book = csv_book("x,y,x\nz,x,z\nx,y,y\n");
+    let fwd = Direction::Forward;
+    assert_eq!(Some(((1, 3), false)), find(&book, "x", (1, 1), fwd, true));
+    assert_eq!(Some(((2, 2), false)), find(&book, "x", (1, 3), fwd, true));
+    assert_eq!(Some(((3, 1), false)), find(&book, "x", (2, 2), fwd, true));
+}
+
+#[test]
+fn test_search_starts_after_an_empty_cursor_cell() {
+    let book = csv_book("a,b\nc,hit\n");
+    // The cursor is beyond the used range.
+    assert_eq!(None, find(&book, "hit", (9, 9), Direction::Forward, false));
+    assert_eq!(
+        Some(((2, 2), true)),
+        find(&book, "hit", (9, 9), Direction::Forward, true)
+    );
+    assert_eq!(
+        Some(((2, 2), false)),
+        find(&book, "hit", (1, 5), Direction::Forward, true)
+    );
+}
+
+#[test]
+fn test_search_wraps_to_the_top() {
+    let book = csv_book("x,a\nb,c\n");
+    assert_eq!(Some(((1, 1), true)), find(&book, "x", (2, 1), Direction::Forward, true));
+}
+
+#[test]
+fn test_search_only_match_is_the_cursor_cell() {
+    let book = csv_book("a,x\nb,c\n");
+    assert_eq!(Some(((1, 2), true)), find(&book, "x", (1, 2), Direction::Forward, true));
+}
+
+#[test]
+fn test_search_without_wrapscan_stops_at_the_end() {
+    let book = csv_book("x,a\nb,c\n");
+    assert_eq!(None, find(&book, "x", (1, 1), Direction::Forward, false));
+}
+
+#[test]
+fn test_search_backward_is_reverse_row_major() {
+    let book = csv_book("x,y,x\nz,x,z\nx,y,y\n");
+    let back = Direction::Backward;
+    assert_eq!(Some(((2, 2), false)), find(&book, "x", (3, 1), back, true));
+    assert_eq!(Some(((1, 3), false)), find(&book, "x", (2, 2), back, true));
+    assert_eq!(Some(((3, 1), true)), find(&book, "x", (1, 1), back, true));
+    assert_eq!(None, find(&book, "x", (1, 1), back, false));
+}
+
+#[test]
+fn test_search_no_match() {
+    let book = csv_book("a,b\nc,d\n");
+    assert_eq!(None, find(&book, "zzz", (1, 1), Direction::Forward, true));
+}
+
+#[test]
+fn test_search_empty_sheet() {
+    let book = Book::default();
+    assert_eq!(None, find(&book, "", (1, 1), Direction::Forward, true));
+    assert_eq!(None, find(&book, ".*", (1, 1), Direction::Forward, true));
+}
+
+#[test]
+fn test_search_skips_cells_with_no_content() {
+    let mut book = csv_book("a,b\n");
+    // A styled cell with no content is in the sheet data but is not visited.
+    book.set_cell_style(
+        &[("font.b", "true")],
+        &Area { sheet: 0, row: 1, column: 3, width: 1, height: 1 },
+    )
+    .expect("style");
+    assert_eq!(Some(((1, 2), false)), find(&book, "^b?$", (1, 1), Direction::Forward, true));
+    assert_eq!(Some(((1, 1), true)), find(&book, "^a?$", (1, 2), Direction::Forward, true));
+}
+
+#[test]
+fn test_search_matches_the_displayed_value() {
+    let mut book = Book::default();
+    book.update_cell(&phase2_addr(1, 1), "=1+1").expect("set");
+    book.update_cell(&phase2_addr(1, 2), "$12.00").expect("set");
+    book.evaluate();
+    assert_eq!(Some(((1, 1), true)), find(&book, "^2$", (1, 1), Direction::Forward, true));
+    assert_eq!(None, find(&book, "1\\+1", (1, 1), Direction::Forward, true));
+    assert_eq!(
+        Some(((1, 2), false)),
+        find(&book, "^\\$12\\.00$", (1, 1), Direction::Forward, true)
+    );
+}
+
+#[test]
+fn test_search_merged_cell_is_its_top_left_cell() {
+    let mut model =
+        Model::new_empty("test", "en", "America/New_York", "en").expect("model");
+    model.workbook.worksheets[0].merge_cells.push("A1:B2".to_string());
+    let mut book = Book::from_model(model);
+    for (row, col) in [(1, 1), (1, 2), (2, 1), (2, 2), (3, 1)] {
+        book.update_cell(&phase2_addr(row, col), "m").expect("set");
+    }
+    book.evaluate();
+    let fwd = Direction::Forward;
+    assert_eq!(Some(((3, 1), false)), find(&book, "m", (1, 1), fwd, true));
+    assert_eq!(Some(((1, 1), true)), find(&book, "m", (3, 1), fwd, true));
+}
+
+#[test]
+fn test_search_array_formula_is_one_cell() {
+    let mut book = csv_book("3\n1\n2\n");
+    book.update_cell(&phase2_addr(1, 2), "=SORT(A1:A3)").expect("set");
+    book.evaluate();
+    // The spilled values in B2 and B3 belong to the formula in B1.
+    assert_eq!(Some(((1, 2), false)), find(&book, "^1$", (1, 1), Direction::Forward, true));
+    assert_eq!(Some(((2, 1), false)), find(&book, "^1$", (1, 2), Direction::Forward, true));
+}
+
+#[test]
+fn test_search_other_sheets_are_not_searched() {
+    let mut book = csv_book("a\n");
+    book.new_sheet(Some("two")).expect("sheet");
+    book.update_cell(&Address { sheet: 1, row: 1, col: 1 }, "hit").expect("set");
+    book.evaluate();
+    assert_eq!(None, find(&book, "hit", (1, 1), Direction::Forward, true));
 }

@@ -1010,7 +1010,7 @@ fn an_unknown_group_is_none() {
 #[test]
 fn the_groups_of_a_mode() {
     assert_eq!(
-        vec!["cell-navigation", "sheet-navigation", "modify", "undo", "other"],
+        vec!["cell-navigation", "sheet-navigation", "modify", "undo", "search", "other"],
         help::groups(MapMode::Navigate)
     );
     assert_eq!(vec!["movement", "selection", "other"], help::groups(MapMode::RangeSelect));

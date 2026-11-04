@@ -1,6 +1,7 @@
 use std::process::ExitCode;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use tui_prompts::State;
 use serial_test::serial;
 
 use crate::book;
@@ -3220,4 +3221,152 @@ fn test_message_is_drawn_on_the_bottom_border() {
     let msg = row.find("theme light").expect("message on the bottom row");
     let modality = row.find("navigate").expect("modality on the bottom row");
     assert!(msg < modality, "{row}");
+}
+
+// ---------------------------------------------------------------------------
+// Search: / and n
+// ---------------------------------------------------------------------------
+
+/// A workspace on a sheet with `x` at A1, C1, B2 and A3, cursor on A1.
+fn search_workspace<'a>() -> Workspace<'a> {
+    let book = book::Book::from_csv_reader("x,y,x\nz,x,z\nx,y,y\n".as_bytes(), None)
+        .expect("csv");
+    Workspace::new(book, std::path::PathBuf::from("search.sui"))
+}
+
+fn at(ws: &Workspace) -> (usize, usize) {
+    (ws.book.location.row, ws.book.location.col)
+}
+
+#[test]
+fn test_slash_opens_the_search_prompt() {
+    let mut ws = search_workspace();
+    script().char('/').run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Search), ws.state.modality_stack.last());
+    script().chars("x").run(&mut ws).expect("run");
+    assert_eq!("x", ws.state.search_prompt.value());
+    // The cursor does not move until Enter.
+    assert_eq!((1, 1), at(&ws));
+}
+
+#[test]
+fn test_slash_pattern_enter_goes_to_the_next_match() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!((1, 3), at(&ws));
+    assert_eq!(None, last_message(&ws));
+    // The edit box shows the new cell.
+    assert_eq!(vec!["x".to_owned()], ws.text_area.lines());
+}
+
+#[test]
+fn test_n_repeats_the_search_and_wraps() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((3, 1), at(&ws));
+    assert_eq!(None, last_message(&ws));
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(
+        Some("search hit BOTTOM, continuing at TOP".to_owned()),
+        last_message(&ws)
+    );
+    // The message lasts until the next key.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    assert_eq!(None, last_message(&ws));
+}
+
+#[test]
+fn test_search_with_no_match_leaves_the_cursor() {
+    let mut ws = search_workspace();
+    script().char('l').char('/').chars("nope").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    assert_eq!(Some("E486: Pattern not found: nope".to_owned()), last_message(&ws));
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    assert_eq!(Some("E486: Pattern not found: nope".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_search_in_an_empty_sheet() {
+    let mut ws = new_workspace();
+    script().char('/').chars(".").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(Some("E486: Pattern not found: .".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_an_invalid_pattern_is_an_error_not_a_panic() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    script().char('/').chars("(x").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    assert_eq!(Some("Invalid pattern: unclosed group".to_owned()), last_message(&ws));
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    // The last good pattern is still the one `n` repeats.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+}
+
+#[test]
+fn test_esc_cancels_the_search_prompt() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").esc().run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(None, last_message(&ws));
+    // Nothing was searched, so there is nothing to repeat.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(
+        Some("E35: No previous regular expression".to_owned()),
+        last_message(&ws)
+    );
+    // The prompt starts empty the next time.
+    script().char('/').run(&mut ws).expect("run");
+    assert_eq!("", ws.state.search_prompt.value());
+}
+
+#[test]
+fn test_search_prompt_keys_are_text_not_commands() {
+    let mut ws = search_workspace();
+    script().char('/').chars("jq").run(&mut ws).expect("run");
+    assert_eq!("jq", ws.state.search_prompt.value());
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(Some(&Modality::Search), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_search_keys_can_be_remapped() {
+    let mut ws = search_workspace();
+    type_command(&mut ws, "nnoremap ; n");
+    type_command(&mut ws, "nunmap /");
+    script().char('/').run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    type_command(&mut ws, "nnoremap <Space>/ /");
+    script().chars(" /").chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    script().char(';').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+}
+
+#[test]
+fn test_search_prompt_is_drawn() {
+    use ratatui::{backend::TestBackend, Terminal};
+    let mut ws = search_workspace();
+    script().char('/').chars("x+").run(&mut ws).expect("run");
+    let mut term = Terminal::new(TestBackend::new(60, 16)).expect("terminal");
+    term.draw(|f| super::render::draw(f, &mut ws)).expect("draw");
+    let buf = term.backend().buffer().clone();
+    let rows: Vec<String> = (0..buf.area.height)
+        .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol().to_owned()).collect())
+        .collect();
+    assert!(rows.iter().any(|r| r.contains("/") && r.contains("x+")), "{rows:#?}");
+    assert!(rows.last().unwrap().contains("search"), "{rows:#?}");
 }

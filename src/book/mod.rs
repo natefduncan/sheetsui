@@ -1,5 +1,6 @@
 pub mod sui;
 pub use sui::ParseWarning;
+pub mod search;
 mod sort;
 pub use sort::SortKey;
 mod undo;
