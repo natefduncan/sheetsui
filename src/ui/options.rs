@@ -3,15 +3,14 @@
 //!
 //! To add an option, add a row to [`OPTIONS`] and, if the code reads it, a
 //! getter on [`Options`].
+use crate::book::search::SearchIn;
 
 /// What kind of value an option holds, and its default.
 #[derive(Debug, Clone, Copy)]
 pub enum Kind {
     /// On or off.
     Bool(bool),
-    /// One of a fixed list of words. The default is the first. No option
-    /// uses it yet; `searchin` will.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// One of a fixed list of words. The default is the first.
     Choice(&'static [&'static str]),
 }
 
@@ -40,6 +39,11 @@ pub const OPTIONS: &[Spec] = &[
         name: "smartcase",
         short: Some("scs"),
         kind: Kind::Bool(false),
+    },
+    Spec {
+        name: "searchin",
+        short: None,
+        kind: Kind::Choice(&["value", "raw"]),
     },
 ];
 
@@ -94,6 +98,15 @@ impl Options {
     /// case.
     pub fn smartcase(&self) -> bool {
         self.flag("smartcase")
+    }
+
+    /// Which text of a cell a search matches.
+    pub fn searchin(&self) -> SearchIn {
+        match self.get("searchin") {
+            Some(Value::Choice("value")) => SearchIn::Value,
+            Some(Value::Choice("raw")) => SearchIn::Raw,
+            other => panic!("searchin has no such value: {other:?}"),
+        }
     }
 
     /// The value of a boolean option. Panics on a name not in the table,
@@ -206,7 +219,18 @@ impl Options {
 mod test {
     use super::*;
 
-    /// A table with a value option, since the real one has none yet.
+    #[test]
+    fn searchin_switches_between_value_and_raw() {
+        let mut o = Options::default();
+        assert_eq!(Ok(None), o.set("searchin=raw"));
+        assert_eq!(SearchIn::Raw, o.searchin());
+        assert_eq!(Ok(None), o.set("searchin=value"));
+        assert_eq!(SearchIn::Value, o.searchin());
+        assert!(o.set("searchin=formula").is_err());
+        assert_eq!(SearchIn::Value, o.searchin());
+    }
+
+    /// A small table to test the `:set` forms on.
     const TABLE: &[Spec] = &[
         Spec {
             name: "wrapscan",
@@ -235,6 +259,7 @@ mod test {
         assert!(o.wrapscan());
         assert!(!o.ignorecase());
         assert!(!o.smartcase());
+        assert_eq!(SearchIn::Value, o.searchin());
         assert_eq!(Some(Value::Bool(false)), o.get("scs"));
         let o = options();
         assert_eq!(Some(Value::Bool(false)), o.get("ic"));

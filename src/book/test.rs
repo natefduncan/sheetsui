@@ -2,7 +2,10 @@ use ironcalc::base::{expressions::types::Area, worksheet::WorksheetDimension, Mo
 
 use crate::ui::Address;
 
-use super::{search::Direction, Book, FileFormat};
+use super::{
+    search::{Direction, SearchIn},
+    Book, FileFormat,
+};
 
 #[test]
 fn test_book_default() {
@@ -1011,7 +1014,20 @@ fn find(
     direction: Direction,
     wrapscan: bool,
 ) -> Option<((usize, usize), bool)> {
-    book.search(0, &re(pattern), &phase2_addr(from.0, from.1), direction, wrapscan)
+    find_in(book, SearchIn::Value, pattern, from, direction, wrapscan)
+}
+
+/// Like [`find`], matching the text `within` says.
+fn find_in(
+    book: &Book,
+    within: SearchIn,
+    pattern: &str,
+    from: (usize, usize),
+    direction: Direction,
+    wrapscan: bool,
+) -> Option<((usize, usize), bool)> {
+    let from = phase2_addr(from.0, from.1);
+    book.search(0, &re(pattern), within, &from, direction, wrapscan)
         .expect("search")
         .map(|hit| ((hit.address.row, hit.address.col), hit.wrapped))
 }
@@ -1107,6 +1123,69 @@ fn test_search_matches_the_displayed_value() {
         Some(((1, 2), false)),
         find(&book, "^\\$12\\.00$", (1, 1), Direction::Forward, true)
     );
+}
+
+/// Formula `=1+1` at A1, `$12.00` at B1, `50%` at C1, a date at D1 and text
+/// at E1.
+fn formats_book() -> Book {
+    let mut book = Book::default();
+    let texts = ["=1+1", "$12.00", "50%", "2026-11-04", "SUM it"];
+    for (col, text) in texts.iter().enumerate() {
+        book.update_cell(&phase2_addr(1, col + 1), text).expect("set");
+    }
+    book.evaluate();
+    book
+}
+
+/// The column of the first cell after A1 whose `within` text matches.
+fn first_col(book: &Book, within: SearchIn, pattern: &str) -> Option<usize> {
+    find_in(book, within, pattern, (1, 1), Direction::Forward, true).map(|((_, col), _)| col)
+}
+
+#[test]
+fn test_search_value_matches_what_is_shown() {
+    let book = formats_book();
+    let value = SearchIn::Value;
+    assert_eq!(Some(1), first_col(&book, value, "^2$"));
+    assert_eq!(None, first_col(&book, value, "1\\+1"));
+    assert_eq!(Some(2), first_col(&book, value, "^\\$12\\.00$"));
+    assert_eq!(Some(3), first_col(&book, value, "^50%$"));
+    assert_eq!(None, first_col(&book, value, "^0\\.5$"));
+    assert_eq!(Some(4), first_col(&book, value, "^2026-11-04$"));
+    assert_eq!(None, first_col(&book, value, "SUM\\("));
+}
+
+#[test]
+fn test_search_raw_matches_what_cell_edit_shows() {
+    let book = formats_book();
+    let raw = SearchIn::Raw;
+    // Each cell matches its stored text, as `e` would show it.
+    for col in 1..=5 {
+        let stored = book.get_cell_addr_contents(&phase2_addr(1, col)).expect("contents");
+        let pattern = format!("^{}$", regex::escape(&stored));
+        let hit = find_in(&book, raw, &pattern, (2, 1), Direction::Forward, true);
+        assert_eq!(Some(((1, col), true)), hit, "{stored}");
+    }
+    assert_eq!(Some(1), first_col(&book, raw, "^=1\\+1$"));
+    assert_eq!(None, first_col(&book, raw, "^2$"));
+    assert_eq!(Some(2), first_col(&book, raw, "^12$"));
+    assert_eq!(None, first_col(&book, raw, "\\$"));
+    assert_eq!(Some(3), first_col(&book, raw, "^0\\.5$"));
+    assert_eq!(None, first_col(&book, raw, "%"));
+    // A date is stored as a number, but CellEdit shows it as a date, so raw
+    // search matches the date too.
+    assert_eq!(Some(4), first_col(&book, raw, "^2026-11-04$"));
+}
+
+#[test]
+fn test_search_raw_finds_formulas() {
+    let mut book = csv_book("1,2\n");
+    book.update_cell(&phase2_addr(2, 1), "=SUM(A1:B1)").expect("set");
+    book.evaluate();
+    let raw = SearchIn::Raw;
+    let fwd = Direction::Forward;
+    assert_eq!(Some(((2, 1), false)), find_in(&book, raw, "SUM\\(", (1, 1), fwd, true));
+    assert_eq!(None, find(&book, "SUM\\(", (1, 1), Direction::Forward, true));
 }
 
 #[test]

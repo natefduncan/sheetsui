@@ -108,8 +108,12 @@ The options are:
 * `smartcase` (`scs`), on or off, default off. With `ignorecase` on, a pattern
   that has an uppercase letter matches case after all. On its own it does
   nothing. A letter after a backslash, as in `\S`, does not count.
+* `searchin`, `value` or `raw`, default `value`. What text a search matches:
+  `value` is what the sheet shows, like `$12.00` or a formula's result; `raw`
+  is what you edit, like `12` or `=A1*2`. Use `set searchin=raw` to search
+  formulas.
 
-`\c` and `\C` in a pattern beat both options. See
+`\c` and `\C` in a pattern beat `ignorecase` and `smartcase`. See
 [Navigation](./navigation.md#search).
 
 <aside>Note that in the case of `quit` and `edit` that we do not currently

@@ -18,6 +18,17 @@ pub enum Direction {
     Backward,
 }
 
+/// Which of a cell's two strings a search matches: the `searchin` option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchIn {
+    /// The displayed value, as the sheet draws it: `$12.00`, `50%`, or a
+    /// formula's result.
+    #[default]
+    Value,
+    /// The raw contents, as CellEdit shows them: `12`, `0.5`, `=A1*2`.
+    Raw,
+}
+
 /// A cell that matched.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hit {
@@ -28,24 +39,27 @@ pub struct Hit {
 }
 
 impl Book {
-    /// Finds the next cell of `sheet` after `from` whose displayed value
-    /// matches `matcher`, going in `direction`. `from` itself is only
+    /// Finds the next cell of `sheet` after `from` whose text, as `within`
+    /// says, matches `matcher`, going in `direction`. `from` itself is only
     /// visited last, after a wrap. Without `wrapscan` the search stops at the
     /// end of the sheet.
     pub fn search(
         &self,
         sheet: u32,
         matcher: &Regex,
+        within: SearchIn,
         from: &Address,
         direction: Direction,
         wrapscan: bool,
     ) -> Result<Option<Hit>> {
         let cells = self.searchable_cells(sheet)?;
         let from = (from.row as i32, from.col as i32);
-        let is_match = |(row, col): &(i32, i32)| {
-            self.model
-                .get_formatted_cell_value(sheet, *row, *col)
-                .is_ok_and(|text| matcher.is_match(&text))
+        let is_match = |&(row, col): &(i32, i32)| {
+            let text = match within {
+                SearchIn::Value => self.model.get_formatted_cell_value(sheet, row, col),
+                SearchIn::Raw => self.model.get_cell_content(sheet, row, col),
+            };
+            text.is_ok_and(|text| matcher.is_match(&text))
         };
         // `ahead` runs from the cursor to the end of the sheet, `behind` from
         // the other end back to the cursor, which is visited last.

@@ -3554,7 +3554,7 @@ fn test_set_shows_and_changes_wrapscan() {
     assert!(!ws.state.options.wrapscan());
     run_command(&mut ws, "set");
     assert_eq!(
-        Some("nowrapscan  noignorecase  nosmartcase".to_owned()),
+        Some("nowrapscan  noignorecase  nosmartcase  searchin=value".to_owned()),
         last_message(&ws)
     );
     run_command(&mut ws, "set ws!");
@@ -3675,3 +3675,66 @@ fn test_changing_ignorecase_after_a_search_changes_n() {
     assert_eq!((1, 1), at(&ws));
 }
 
+
+// ---------------------------------------------------------------------------
+// Search: searchin
+// ---------------------------------------------------------------------------
+
+/// A workspace with `1` at A1, `=A1*2` at B1 and `$12.00` at C1, cursor on
+/// A1.
+fn searchin_workspace<'a>() -> Workspace<'a> {
+    let mut book = book::Book::from_csv_reader("1\n".as_bytes(), None).expect("csv");
+    for (col, text) in [(2, "=A1*2"), (3, "$12.00")] {
+        book.update_cell(&Address { sheet: 0, row: 1, col }, text).expect("set");
+    }
+    book.evaluate();
+    Workspace::new(book, std::path::PathBuf::from("searchin.sui"))
+}
+
+#[test]
+fn test_searchin_value_matches_the_displayed_value() {
+    let mut ws = searchin_workspace();
+    script().char('/').chars("^2$").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    script().char('/').chars("A1").enter().run(&mut ws).expect("run");
+    assert_eq!(Some("E486: Pattern not found: A1".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_searchin_raw_matches_formulas_and_stored_numbers() {
+    let mut ws = searchin_workspace();
+    run_command(&mut ws, "set searchin=raw");
+    script().char('/').chars("A1\\*").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    script().char('/').chars("^12$").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    script().char('/').chars("\\$").enter().run(&mut ws).expect("run");
+    assert_eq!(Some("E486: Pattern not found: \\$".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_changing_searchin_after_a_search_changes_n() {
+    let mut ws = searchin_workspace();
+    script().char('/').chars("2").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    run_command(&mut ws, "set searchin=raw");
+    script().char('n').run(&mut ws).expect("run");
+    // B1's raw `=A1*2` still has a 2, and so does C1's stored `12`.
+    assert_eq!((1, 3), at(&ws));
+    run_command(&mut ws, "set searchin=value");
+    script().char('/').chars("^2$").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+}
+
+#[test]
+fn test_set_searchin_bad_value_is_an_error() {
+    let mut ws = searchin_workspace();
+    run_command(&mut ws, "set searchin=formula");
+    assert_eq!(
+        Some("E474: Invalid argument: searchin=formula (one of: value, raw)".to_owned()),
+        last_message(&ws)
+    );
+    assert_eq!(book::search::SearchIn::Value, ws.state.options.searchin());
+    run_command(&mut ws, "set searchin?");
+    assert_eq!(Some("searchin=value".to_owned()), last_message(&ws));
+}

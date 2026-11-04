@@ -80,6 +80,15 @@ wins. They are not part of what is matched: `/apple\c` searches for `apple`.
 Changing an option after a search changes what `n` and `N` find. See
 [Options](./command.md#options).
 
+A cell has two kinds of text: its value as the sheet shows it (`$12.00`,
+`50%`, the result of a formula) and its raw contents as `e` shows them for
+editing (`12`, `0.5`, `=A1*2`). A search matches the shown value. With
+`:set searchin=raw` it matches the raw contents instead, so `/SUM\(` finds the
+cells whose formula calls `SUM`, and `/^12$` finds the cell showing `$12.00`.
+A date shows the date in both. `:set searchin=value` goes back. Changing it
+after a search changes what `n` and `N` find. See
+[Options](./command.md#options).
+
 A merged cell is searched once, as its top-left cell. An array formula is
 searched once, as the cell that holds the formula.
 

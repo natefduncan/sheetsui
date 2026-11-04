@@ -1468,6 +1468,7 @@ impl<'ws> Workspace<'ws> {
             }
         };
         let wrapscan = self.state.options.wrapscan();
+        let within = self.state.options.searchin();
         let mut from = self.book.location.clone();
         let mut found = Ok(None);
         let mut wrapped = false;
@@ -1475,7 +1476,9 @@ impl<'ws> Workspace<'ws> {
         let mut remaining = count.max(1);
         let mut step = 0;
         while remaining > 0 {
-            found = self.book.search(from.sheet, matcher, &from, direction, wrapscan);
+            found = self
+                .book
+                .search(from.sheet, matcher, within, &from, direction, wrapscan);
             let Ok(Some(hit)) = &found else { break };
             remaining -= 1;
             step += 1;
