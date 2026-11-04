@@ -5,7 +5,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::book::{self, search::Direction, AddressRange, Book, SortKey};
+use crate::book::{self, search::Direction, substitute, AddressRange, Book, SortKey};
 
 use anyhow::{anyhow, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -757,6 +757,13 @@ impl<'ws> Workspace<'ws> {
             }
             Ok(Some(Cmd::NoHighlight)) => {
                 self.state.search.highlight = false;
+                Ok(None)
+            }
+            Ok(Some(Cmd::Substitute(text))) => {
+                match self.substitute_current_cell(text) {
+                    Ok(msg) => self.set_message(MessageLevel::Info, msg),
+                    Err(msg) => self.set_message(MessageLevel::Error, msg),
+                }
                 Ok(None)
             }
             Ok(Some(Cmd::Write(maybe_path))) => {
@@ -1682,6 +1689,31 @@ impl<'ws> Workspace<'ws> {
     }
 
     /// The case options a pattern is compiled with.
+    /// Runs `:s` on the current cell. Returns the message for the user: the
+    /// counts, or what went wrong. An empty pattern is the last search's.
+    fn substitute_current_cell(&mut self, text: &str) -> Result<String, String> {
+        let command = substitute::parse(text)?;
+        let case = self.case_options();
+        let (pattern, matcher) = if command.pattern.is_empty() {
+            match self.state.search.last(case) {
+                Some(last) => last.map(|(text, re)| (text.to_owned(), re.clone()))?,
+                None => return Err("E35: No previous regular expression".to_owned()),
+            }
+        } else {
+            let matcher = search::compile(&command.pattern, case)?;
+            (command.pattern, matcher)
+        };
+        let cell = [self.book.location.clone()];
+        let counts = self
+            .book
+            .substitute(&cell, &matcher, &command.replacement, command.flags.global)
+            .map_err(|e| e.to_string())?;
+        if counts.substitutions == 0 && !command.flags.quiet {
+            return Err(format!("E486: Pattern not found: {}", pattern));
+        }
+        Ok(counts.message())
+    }
+
     fn case_options(&self) -> CaseOptions {
         CaseOptions {
             ignorecase: self.state.options.ignorecase(),

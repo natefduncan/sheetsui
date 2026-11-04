@@ -21,6 +21,9 @@ pub enum Cmd<'a> {
     Set(&'a str),
     /// `:noh`: hide the search highlight until the next search.
     NoHighlight,
+    /// `:s/pat/rep/flags` on the current cell: the text from the delimiter
+    /// on, still to parse. See `book/substitute.rs`.
+    Substitute(&'a str),
     ExportCsv(&'a str),
     SystemPaste,
     Sort { skip: usize, keys: Vec<CmdSortKey> },
@@ -105,6 +108,10 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_redo(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    // Last: `s` starts other commands, which a letter after it tells apart.
+    if let Some(cmd) = try_consume_substitute(cursor.clone())? {
         return Ok(Some(cmd));
     }
     Ok(None)
@@ -381,6 +388,23 @@ fn try_consume_nohlsearch<'cmd, 'i: 'cmd>(
         Ok(Some(Cmd::NoHighlight))
     } else {
         Err("Invalid command: nohlsearch does not take an argument")
+    }
+}
+
+/// `:s` or `:substitute`, then a delimiter that cannot start a longer
+/// command name, as in vim: `:s/a/b/`, `:s#a#b#`.
+fn try_consume_substitute<'cmd, 'i: 'cmd>(
+    input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    use crate::book::substitute::is_delimiter;
+    let text = input.span(0..);
+    let Some(rest) = ["substitute", "s"].iter().find_map(|name| text.strip_prefix(name)) else {
+        return Ok(None);
+    };
+    match rest.chars().next() {
+        None => Err("Invalid command: Did you mean to type `s/pattern/replacement/`?"),
+        Some(c) if is_delimiter(c) => Ok(Some(Cmd::Substitute(rest))),
+        Some(_) => Ok(None),
     }
 }
 

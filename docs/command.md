@@ -43,6 +43,7 @@ The currently supported commands are:
 * `system-paste` Paste from the system clipboard
 * `sort [skip <N>] [<column> [asc|desc] ...]` Sort rows. See Sorting below.
 * `set [option ...]` Change or show an option for this session. See Options below.
+* `s/pattern/replacement/[flags]` Replace text in the current cell. See Replacing below.
 * `nohlsearch` Stop highlighting the matches of the last search until the next search. `noh` is a shorthand alias for this command.
 * `undo` Undo the last change, the same as `u` in navigation mode.
 * `redo` Redo the last change that you undid, the same as `r` in navigation mode.
@@ -84,6 +85,51 @@ Formulas follow the same rules as in Excel:
 You cannot sort rows that contain merged cells or array formulas.
 
 A sort undoes in one step: `u` in navigation mode, or `:undo`.
+
+## Replacing
+
+`s/pattern/replacement/` replaces the first match of `pattern` in the current
+cell. `s/pattern/replacement/g` replaces every match in it. The pattern is
+the same as for a [search](./navigation.md#search), and `ignorecase`,
+`smartcase`, `\c` and `\C` apply to it the same way. An empty pattern, as in
+`s//x/`, is the last search pattern. `substitute` is the long name of `s`.
+
+`s` edits what you edit in CellEdit mode, the raw contents, whatever
+`searchin` is. `s/SUM/AVERAGE/` changes the formula `=SUM(A1:A3)`. The new
+text goes into the cell as if you typed it: a formula stays a formula, a
+number stays a number, and the cell's format and style do not change. A
+replacement that makes a bad formula shows the formula error, as typing it
+would.
+
+So a search and a replacement can see different text. On a cell that stores
+`12` and shows `$12.00`, `/12\.00` finds the cell, but `s/12\.00/x/` does not
+match it: it matches the stored `12`. Use `set searchin=raw` to search the
+text that `s` edits.
+
+In the replacement:
+
+* `&` or `\0` is the whole match. `\1` to `\9` are the groups of the
+  pattern: `s/(\w+) (\w+)/\2 \1/` swaps two words.
+* `\&` is a literal `&`, `\\` a literal backslash, and `\/` a literal `/`.
+* `$` is just a `$`.
+* A cell holds one line, so `\n` and `\r` are errors, as is a backslash before
+  any other letter.
+
+Any character that is not a letter, a digit, white space, `\`, `"` or `|` can
+stand in for `/`: `s#a/b#c#` replaces `a/b` with `c`. The last delimiter can
+be left out when there are no flags: `s/a/b`.
+
+Flags:
+
+* `g` replaces every match in the cell, not only the first.
+* `e` gives no error when nothing matches.
+
+Flags combine, as in `s/a/b/ge`. An unknown flag is an error that names it.
+
+`s` says how much it did, for example `3 substitutions on 1 cell`. If nothing
+matches it says `E486: Pattern not found: <pattern>` and changes nothing. It
+cannot edit an array formula, or a cell that one fills. A replacement undoes
+in one step; one that changes nothing is not a step.
 
 ## Options
 

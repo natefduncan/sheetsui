@@ -2,6 +2,7 @@ pub mod sui;
 pub use sui::ParseWarning;
 pub mod search;
 mod sort;
+pub mod substitute;
 pub use sort::SortKey;
 mod undo;
 use undo::UndoHistory;

@@ -1291,3 +1291,132 @@ fn test_matches_in_skips_hidden_merged_and_spilled_cells() {
         matches_in(&book, SearchIn::Raw, "SORT", (1, 3), (3, 3))
     );
 }
+
+// -------------------------------------------------------------------------
+// Substitute
+// -------------------------------------------------------------------------
+
+/// Runs `:s` with `pattern` and `replacement` (vim form) on one cell.
+fn sub_cell(
+    book: &mut Book,
+    cell: (usize, usize),
+    pattern: &str,
+    replacement: &str,
+    global: bool,
+) -> anyhow::Result<super::substitute::Counts> {
+    let replacement = super::substitute::replacement_form(replacement).expect("replacement");
+    book.substitute(&[phase2_addr(cell.0, cell.1)], &re(pattern), &replacement, global)
+}
+
+fn contents(book: &Book, row: usize, col: usize) -> String {
+    book.get_cell_addr_contents(&phase2_addr(row, col)).expect("contents")
+}
+
+#[test]
+fn test_substitute_edits_the_formula_and_it_stays_a_formula() {
+    let mut book = csv_book("2,3\n");
+    book.update_cell(&phase2_addr(2, 1), "=SUM(A1:B1)").expect("set");
+    book.evaluate();
+    let counts = sub_cell(&mut book, (2, 1), "SUM", "PRODUCT", false).expect("sub");
+    assert_eq!((counts.substitutions, counts.cells), (1, 1));
+    assert_eq!(contents(&book, 2, 1), "=PRODUCT(A1:B1)");
+    assert_eq!(rendered(&book, 2, 1), "6");
+}
+
+#[test]
+fn test_substitute_number_stays_a_number() {
+    let mut book = csv_book("12\n");
+    book.update_cell(&phase2_addr(2, 1), "=A1*2").expect("set");
+    book.evaluate();
+    sub_cell(&mut book, (1, 1), "1", "3", false).expect("sub");
+    assert_eq!(rendered(&book, 2, 1), "64");
+}
+
+#[test]
+fn test_substitute_matches_the_stored_number_not_the_shown_one() {
+    let mut book = csv_book("12\n");
+    let area = Area { sheet: 0, row: 1, column: 1, width: 1, height: 1 };
+    book.set_cell_style(&[("num_fmt", "$#,##0.00")], &area).expect("format");
+    assert_eq!(rendered(&book, 1, 1), "$12.00");
+    let counts = sub_cell(&mut book, (1, 1), "12\\.00", "x", false).expect("sub");
+    assert_eq!(counts.substitutions, 0);
+    sub_cell(&mut book, (1, 1), "12", "15", false).expect("sub");
+    assert_eq!(rendered(&book, 1, 1), "$15.00");
+}
+
+#[test]
+fn test_substitute_keeps_the_cell_style() {
+    let mut book = csv_book("apple\n");
+    let area = Area { sheet: 0, row: 1, column: 1, width: 1, height: 1 };
+    book.set_cell_style(&[("font.b", "true"), ("fill.color", "#ff0000")], &area)
+        .expect("style");
+    let before = book.get_cell_style(&phase2_addr(1, 1));
+    sub_cell(&mut book, (1, 1), "apple", "pear", false).expect("sub");
+    assert_eq!(rendered(&book, 1, 1), "pear");
+    assert_eq!(book.get_cell_style(&phase2_addr(1, 1)), before);
+}
+
+#[test]
+fn test_substitute_invalid_formula_behaves_as_typed() {
+    let mut book = csv_book("1\n");
+    book.update_cell(&phase2_addr(2, 1), "=A1+1").expect("set");
+    book.evaluate();
+    let mut typed = csv_book("1\n");
+    typed.update_cell(&phase2_addr(2, 1), "=A1+").expect("set");
+    typed.evaluate();
+    sub_cell(&mut book, (2, 1), "1$", "", false).expect("sub");
+    assert_eq!(contents(&book, 2, 1), contents(&typed, 2, 1));
+    assert_eq!(rendered(&book, 2, 1), rendered(&typed, 2, 1));
+    assert!(book.undo().expect("undo"));
+    assert_eq!(contents(&book, 2, 1), "=A1+1");
+}
+
+#[test]
+fn test_substitute_is_one_undo_step() {
+    let mut book = csv_book("banana\n");
+    sub_cell(&mut book, (1, 1), "a", "o", true).expect("sub");
+    assert_eq!(rendered(&book, 1, 1), "bonono");
+    assert!(book.undo().expect("undo"));
+    assert_eq!(rendered(&book, 1, 1), "banana");
+    assert!(!book.undo().expect("undo"));
+    assert!(book.redo().expect("redo"));
+    assert_eq!(rendered(&book, 1, 1), "bonono");
+}
+
+#[test]
+fn test_substitute_with_no_match_is_not_an_undo_step() {
+    let mut book = csv_book("banana\n");
+    let counts = sub_cell(&mut book, (1, 1), "z", "o", true).expect("sub");
+    assert_eq!(counts.substitutions, 0);
+    assert!(!book.undo().expect("undo"));
+    assert!(!book.dirty);
+}
+
+#[test]
+fn test_substitute_with_the_same_text_counts_but_changes_nothing() {
+    let mut book = csv_book("banana\n");
+    let counts = sub_cell(&mut book, (1, 1), "a", "a", true).expect("sub");
+    assert_eq!((counts.substitutions, counts.cells), (3, 1));
+    assert!(!book.undo().expect("undo"));
+    assert!(!book.dirty);
+}
+
+#[test]
+fn test_substitute_refuses_an_array_formula() {
+    let mut book = csv_book("3,\n1,\n2,\n");
+    book.update_cell(&phase2_addr(1, 2), "=SORT(A1:A3)").expect("set");
+    book.evaluate();
+    let err = sub_cell(&mut book, (1, 2), "SORT", "SUM", false).expect_err("array");
+    assert_eq!(err.to_string(), "Cannot substitute in an array formula.");
+    assert_eq!(contents(&book, 1, 2), "=SORT(A1:A3)");
+    let err = sub_cell(&mut book, (2, 2), ".", "9", false).expect_err("spill");
+    assert_eq!(err.to_string(), "Cannot substitute in an array formula.");
+    assert_eq!(column(&book, 2, 1..=3), vec!["1", "2", "3"]);
+}
+
+#[test]
+fn test_substitute_groups_and_ampersand_in_a_cell() {
+    let mut book = csv_book("Smith John\n");
+    sub_cell(&mut book, (1, 1), "(\\w+) (\\w+)", "\\2 \\1 (&)", false).expect("sub");
+    assert_eq!(rendered(&book, 1, 1), "John Smith (Smith John)");
+}

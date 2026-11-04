@@ -4210,3 +4210,144 @@ fn test_star_and_hash_patterns_go_into_the_search_history() {
     script().char('/').up().run(&mut ws).expect("run");
     assert_eq!(search_prompt_text(&ws), "^paid$");
 }
+
+// ---------------------------------------------------------------------------
+// Replace: :s on the current cell
+// ---------------------------------------------------------------------------
+
+/// A workspace with `banana,=SUM(C1:D1)` in row 1 and `2,3` in C1 and D1,
+/// cursor on A1.
+fn sub_workspace<'a>() -> Workspace<'a> {
+    let mut book = book::Book::from_csv_reader("banana,,2,3\n".as_bytes(), None).expect("csv");
+    book.update_cell(&Address { sheet: 0, row: 1, col: 2 }, "=SUM(C1:D1)")
+        .expect("set");
+    book.evaluate();
+    Workspace::new(book, std::path::PathBuf::from("sub.sui"))
+}
+
+fn cell_text(ws: &Workspace, row: usize, col: usize) -> String {
+    ws.book
+        .get_cell_addr_contents(&Address { sheet: 0, row, col })
+        .expect("contents")
+}
+
+#[test]
+fn test_parse_substitute_command() {
+    use super::cmd::{parse, Cmd};
+    assert_eq!(parse("s/a/b/g"), Ok(Some(Cmd::Substitute("/a/b/g"))));
+    assert_eq!(parse("s#a#b#"), Ok(Some(Cmd::Substitute("#a#b#"))));
+    assert_eq!(parse("substitute/a/b/"), Ok(Some(Cmd::Substitute("/a/b/"))));
+    assert!(parse("s").is_err());
+    // Other commands that start with `s` still parse as themselves.
+    assert_eq!(parse("set ic"), Ok(Some(Cmd::Set("ic"))));
+    assert!(matches!(parse("sort"), Ok(Some(Cmd::Sort { .. }))));
+    assert_eq!(parse("system-paste"), Ok(Some(Cmd::SystemPaste)));
+    assert_eq!(parse("sx/a/b/"), Ok(None));
+}
+
+#[test]
+fn test_substitute_replaces_in_the_current_cell_only() {
+    let mut ws = sub_workspace();
+    run_command(&mut ws, "s/a/o/g");
+    assert_eq!(cell_text(&ws, 1, 1), "bonono");
+    assert_eq!(Some("3 substitutions on 1 cell".to_owned()), last_message(&ws));
+    assert_eq!(ws.state.message.as_ref().map(|m| m.level), Some(super::MessageLevel::Info));
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    run_command(&mut ws, "s/o/a/");
+    assert_eq!(cell_text(&ws, 1, 1), "banono");
+    assert_eq!(Some("1 substitution on 1 cell".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_substitute_edits_the_formula_even_with_searchin_value() {
+    let mut ws = sub_workspace();
+    script().char('l').run(&mut ws).expect("run");
+    run_command(&mut ws, "set searchin=value");
+    run_command(&mut ws, "s/SUM/PRODUCT/");
+    assert_eq!(cell_text(&ws, 1, 2), "=PRODUCT(C1:D1)");
+    assert_eq!(ws.book.get_cell_addr_rendered(&Address { sheet: 0, row: 1, col: 2 }).expect("value"), "6");
+}
+
+#[test]
+fn test_substitute_no_match_is_e486_and_e_silences_it() {
+    let mut ws = sub_workspace();
+    run_command(&mut ws, "s/z/o/");
+    assert_eq!(Some("E486: Pattern not found: z".to_owned()), last_message(&ws));
+    assert_eq!(ws.state.message.as_ref().map(|m| m.level), Some(super::MessageLevel::Error));
+    run_command(&mut ws, "s/z/o/e");
+    assert_eq!(Some("0 substitutions on 0 cells".to_owned()), last_message(&ws));
+    assert_eq!(cell_text(&ws, 1, 1), "banana");
+}
+
+#[test]
+fn test_substitute_is_one_undo_step_and_a_no_op_is_none() {
+    let mut ws = sub_workspace();
+    run_command(&mut ws, "s/a/o/g");
+    run_command(&mut ws, "s/z/o/e");
+    // Had the no-op been a step, this `u` would undo it and change nothing.
+    script().char('u').run(&mut ws).expect("run");
+    assert_eq!(cell_text(&ws, 1, 1), "banana");
+    assert_eq!(cell_text(&ws, 1, 2), "=SUM(C1:D1)");
+    script().char('r').run(&mut ws).expect("run");
+    assert_eq!(cell_text(&ws, 1, 1), "bonono");
+}
+
+#[test]
+fn test_substitute_errors_go_to_the_message_line() {
+    let mut ws = sub_workspace();
+    for (command, expected) in [
+        ("s/a/b/x", "E488: Unknown flag of :s: x"),
+        ("s/a/b/c", "The c flag of :s is not supported yet"),
+        ("s/a/\\n/", "Cannot use \\n or \\r in a replacement: a cell holds one line"),
+        ("s/(/b/", ""),
+    ] {
+        run_command(&mut ws, command);
+        let msg = ws.state.message.as_ref().expect("message");
+        assert_eq!(msg.level, super::MessageLevel::Error, "{}", command);
+        assert!(msg.text.starts_with(expected), "{}: {}", command, msg.text);
+        assert_eq!(cell_text(&ws, 1, 1), "banana");
+    }
+}
+
+#[test]
+fn test_substitute_array_formula_is_refused() {
+    let mut book = book::Book::from_csv_reader("3,\n1,\n".as_bytes(), None).expect("csv");
+    book.update_cell(&Address { sheet: 0, row: 1, col: 2 }, "=SORT(A1:A2)").expect("set");
+    book.evaluate();
+    let mut ws = Workspace::new(book, std::path::PathBuf::from("arr.sui"));
+    script().char('l').run(&mut ws).expect("run");
+    run_command(&mut ws, "s/SORT/SUM/");
+    assert_eq!(Some("Cannot substitute in an array formula.".to_owned()), last_message(&ws));
+    assert_eq!(cell_text(&ws, 1, 2), "=SORT(A1:A2)");
+}
+
+#[test]
+fn test_substitute_uses_case_options_and_case_atoms() {
+    let mut ws = sub_workspace();
+    run_command(&mut ws, "s/BAN/x/");
+    assert_eq!(cell_text(&ws, 1, 1), "banana");
+    run_command(&mut ws, "s/\\cBAN/x/");
+    assert_eq!(cell_text(&ws, 1, 1), "xana");
+    run_command(&mut ws, "set ic");
+    run_command(&mut ws, "s/X/b/");
+    assert_eq!(cell_text(&ws, 1, 1), "bana");
+}
+
+#[test]
+fn test_substitute_empty_pattern_uses_the_last_search() {
+    let mut ws = sub_workspace();
+    run_command(&mut ws, "s//x/");
+    assert_eq!(Some("E35: No previous regular expression".to_owned()), last_message(&ws));
+    script().char('/').chars("an").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    run_command(&mut ws, "s//[&]/g");
+    assert_eq!(cell_text(&ws, 1, 1), "b[an][an]a");
+}
+
+#[test]
+fn test_substitute_goes_into_the_command_history() {
+    let mut ws = sub_workspace();
+    run_command(&mut ws, "s/a/o/");
+    script().char(':').up().run(&mut ws).expect("run");
+    assert_eq!(ws.state.command_state.value(), "s/a/o/");
+}
