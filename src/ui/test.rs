@@ -4347,6 +4347,91 @@ fn test_substitute_empty_pattern_uses_the_last_search() {
 }
 
 #[test]
+fn test_substitute_i_flag_ignores_case_over_the_options() {
+    let mut ws = sub_workspace();
+    run_command(&mut ws, "s/BAN/x/i");
+    assert_eq!(cell_text(&ws, 1, 1), "xana");
+    // `i` ignores case even when smartcase would not.
+    run_command(&mut ws, "set ic scs");
+    run_command(&mut ws, "s/A/o/gi");
+    assert_eq!(cell_text(&ws, 1, 1), "xono");
+    assert_eq!(Some("2 substitutions on 1 cell".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_substitute_big_i_flag_matches_case_over_the_options() {
+    let mut ws = sub_workspace();
+    run_command(&mut ws, "set ic");
+    run_command(&mut ws, "s/BAN/x/I");
+    assert_eq!(Some("E486: Pattern not found: BAN".to_owned()), last_message(&ws));
+    assert_eq!(cell_text(&ws, 1, 1), "banana");
+    run_command(&mut ws, "s/a/o/gI");
+    assert_eq!(cell_text(&ws, 1, 1), "bonono");
+    // `\c` in the pattern still wins over the flag.
+    run_command(&mut ws, "s/\\cB/c/I");
+    assert_eq!(cell_text(&ws, 1, 1), "conono");
+}
+
+#[test]
+fn test_substitute_case_flags_with_an_empty_pattern_leave_the_search_alone() {
+    let mut ws = grid_workspace();
+    ws.book.update_cell(&Address { sheet: 0, row: 3, col: 3 }, "A").expect("set");
+    script().char('/').chars("a").enter().run(&mut ws).expect("run");
+    run_command(&mut ws, "%s//b/gi");
+    assert_eq!(vec!["bbb", "bbb", "bbb"], grid_rows(&ws));
+    // The flag was for that command only: `n` still matches case.
+    ws.book.update_cell(&Address { sheet: 0, row: 3, col: 3 }, "A").expect("set");
+    ws.book.update_cell(&Address { sheet: 0, row: 1, col: 1 }, "a").expect("set");
+    assert_eq!((1, 2), at(&ws));
+    // From B1, an `n` that ignored case would stop on C3 before A1.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+}
+
+#[test]
+fn test_substitute_n_flag_counts_and_changes_nothing() {
+    let mut ws = grid_workspace();
+    run_command(&mut ws, "%s/a/b/n");
+    assert_eq!(Some("9 matches on 9 cells".to_owned()), last_message(&ws));
+    assert_eq!(vec!["aaa", "aaa", "aaa"], grid_rows(&ws));
+    ws.book.update_cell(&Address { sheet: 0, row: 1, col: 1 }, "banana").expect("set");
+    run_command(&mut ws, "s/a/b/n");
+    assert_eq!(Some("1 match on 1 cell".to_owned()), last_message(&ws));
+    run_command(&mut ws, "s/a/b/gn");
+    assert_eq!(Some("3 matches on 1 cell".to_owned()), last_message(&ws));
+    run_command(&mut ws, "s/A/b/gni");
+    assert_eq!(Some("3 matches on 1 cell".to_owned()), last_message(&ws));
+    assert_eq!(cell_text(&ws, 1, 1), "banana");
+    run_command(&mut ws, "s/z/b/n");
+    assert_eq!(Some("E486: Pattern not found: z".to_owned()), last_message(&ws));
+    run_command(&mut ws, "s/z/b/ne");
+    assert_eq!(Some("0 matches on 0 cells".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_substitute_n_flag_is_no_undo_step() {
+    let mut ws = sub_workspace();
+    run_command(&mut ws, "s/a/o/g");
+    run_command(&mut ws, "s/o/a/gn");
+    assert_eq!(cell_text(&ws, 1, 1), "bonono");
+    // Had the count been a step, this `u` would undo it and change nothing.
+    script().char('u').run(&mut ws).expect("run");
+    assert_eq!(cell_text(&ws, 1, 1), "banana");
+}
+
+#[test]
+fn test_substitute_n_flag_counts_array_formulas() {
+    let mut book = book::Book::from_csv_reader("3,\n1,\n".as_bytes(), None).expect("csv");
+    book.update_cell(&Address { sheet: 0, row: 1, col: 2 }, "=SORT(A1:A2)").expect("set");
+    book.evaluate();
+    let mut ws = Workspace::new(book, std::path::PathBuf::from("arr.sui"));
+    script().char('l').run(&mut ws).expect("run");
+    run_command(&mut ws, "s/SORT/SUM/n");
+    assert_eq!(Some("1 match on 1 cell".to_owned()), last_message(&ws));
+    assert_eq!(cell_text(&ws, 1, 2), "=SORT(A1:A2)");
+}
+
+#[test]
 fn test_substitute_goes_into_the_command_history() {
     let mut ws = sub_workspace();
     run_command(&mut ws, "s/a/o/");

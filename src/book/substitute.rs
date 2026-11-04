@@ -42,6 +42,12 @@ pub struct Flags {
     pub global: bool,
     /// `e`: no error when nothing matches.
     pub quiet: bool,
+    /// `i` (`Some(true)`) or `I` (`Some(false)`): ignore or match case,
+    /// whatever `ignorecase` and `smartcase` say. The last one wins, as in
+    /// vim. `\c` and `\C` in the pattern still win over both.
+    pub ignore_case: Option<bool>,
+    /// `n`: count the matches and change nothing.
+    pub count: bool,
 }
 
 /// What a substitution did.
@@ -54,21 +60,31 @@ pub struct Counts {
 impl Counts {
     /// The message for the user: `3 substitutions on 1 cell`.
     pub fn message(&self) -> String {
+        self.describe("substitution", "substitutions")
+    }
+
+    /// The message for the `n` flag, which changes nothing:
+    /// `3 matches on 1 cell`.
+    pub fn match_message(&self) -> String {
+        self.describe("match", "matches")
+    }
+
+    fn describe(&self, one: &str, many: &str) -> String {
         format!(
             "{} {} on {} {}",
             self.substitutions,
-            plural(self.substitutions, "substitution"),
+            plural(self.substitutions, one, many),
             self.cells,
-            plural(self.cells, "cell"),
+            plural(self.cells, "cell", "cells"),
         )
     }
 }
 
-fn plural(n: usize, word: &str) -> String {
+fn plural<'a>(n: usize, one: &'a str, many: &'a str) -> &'a str {
     if n == 1 {
-        word.to_owned()
+        one
     } else {
-        format!("{}s", word)
+        many
     }
 }
 
@@ -186,7 +202,10 @@ fn parse_flags(text: &str) -> Result<Flags, String> {
         match c {
             'g' => flags.global = true,
             'e' => flags.quiet = true,
-            'c' | 'i' | 'I' | 'n' => {
+            'i' => flags.ignore_case = Some(true),
+            'I' => flags.ignore_case = Some(false),
+            'n' => flags.count = true,
+            'c' => {
                 return Err(format!("The {} flag of :s is not supported yet", c))
             }
             other => return Err(format!("E488: Unknown flag of :s: {}", other)),
@@ -203,17 +222,47 @@ pub fn substitute_text(
     replacement: &str,
     global: bool,
 ) -> (String, usize) {
-    let limit = if global { 0 } else { 1 };
-    let found = matcher.find_iter(text).count();
-    if found == 0 {
+    let count = count_matches(text, matcher, global);
+    if count == 0 {
         return (text.to_owned(), 0);
     }
-    let count = if global { found } else { 1 };
+    let limit = if global { 0 } else { 1 };
     let new = matcher.replacen(text, limit, replacement).into_owned();
     (new, count)
 }
 
+/// How many matches a replacement would replace in `text`: all of them with
+/// `global`, else at most one.
+fn count_matches(text: &str, matcher: &Regex, global: bool) -> usize {
+    if global {
+        matcher.find_iter(text).count()
+    } else {
+        usize::from(matcher.is_match(text))
+    }
+}
+
 impl Book {
+    /// Counts what [`Book::substitute`] would replace in `cells`, for the
+    /// `n` flag. It changes nothing, so it is no undo step, and an array
+    /// formula is counted like any other cell.
+    pub fn count_substitutions(
+        &self,
+        cells: &[Address],
+        matcher: &Regex,
+        global: bool,
+    ) -> Result<Counts> {
+        let mut counts = Counts::default();
+        for address in cells {
+            let text = self.search_text(address, SearchIn::Raw)?;
+            let count = count_matches(&text, matcher, global);
+            if count > 0 {
+                counts.substitutions += count;
+                counts.cells += 1;
+            }
+        }
+        Ok(counts)
+    }
+
     /// Replaces `matcher` with `replacement` (in the `regex` crate's form) in
     /// the raw contents of `cells`, as one undo step. Each changed cell gets
     /// its new text as if typed. A cell the pattern does not match is not
@@ -396,6 +445,52 @@ mod tests {
     }
 
     #[test]
+    fn i_and_big_i_set_the_case_and_the_last_wins() {
+        assert_eq!(parse("/a/b/i").expect("i").flags.ignore_case, Some(true));
+        assert_eq!(parse("/a/b/I").expect("I").flags.ignore_case, Some(false));
+        assert_eq!(parse("/a/b/iI").expect("iI").flags.ignore_case, Some(false));
+        assert_eq!(parse("/a/b/Ii").expect("Ii").flags.ignore_case, Some(true));
+        assert_eq!(parse("/a/b/").expect("none").flags.ignore_case, None);
+    }
+
+    #[test]
+    fn n_flag_combines_with_g() {
+        let flags = parse("/a/b/gn").expect("gn").flags;
+        assert!(flags.count && flags.global);
+        let flags = parse("/a/b/n").expect("n").flags;
+        assert!(flags.count && !flags.global);
+    }
+
+    #[test]
+    fn count_matches_follows_g() {
+        let matcher = Regex::new("a").expect("regex");
+        assert_eq!(count_matches("banana", &matcher, true), 3);
+        assert_eq!(count_matches("banana", &matcher, false), 1);
+        assert_eq!(count_matches("xyz", &matcher, false), 0);
+    }
+
+    #[test]
+    fn count_substitutions_changes_nothing() {
+        let mut book = Book::from_csv_reader("banana,apple,kiwi\n".as_bytes(), None).expect("csv");
+        book.evaluate();
+        let cells: Vec<Address> = (1..=3).map(|col| Address { sheet: 0, row: 1, col }).collect();
+        let matcher = Regex::new("a").expect("regex");
+        let all = book.count_substitutions(&cells, &matcher, true).expect("count");
+        assert_eq!(all, Counts { substitutions: 4, cells: 2 });
+        let first = book.count_substitutions(&cells, &matcher, false).expect("count");
+        assert_eq!(first, Counts { substitutions: 2, cells: 2 });
+        assert_eq!(book.get_cell_addr_contents(&cells[0]).expect("contents"), "banana");
+    }
+
+    #[test]
+    fn match_message_is_plural_aware() {
+        let one = Counts { substitutions: 1, cells: 1 };
+        assert_eq!(one.match_message(), "1 match on 1 cell");
+        let many = Counts { substitutions: 3, cells: 2 };
+        assert_eq!(many.match_message(), "3 matches on 2 cells");
+    }
+
+    #[test]
     fn c_flag_is_not_supported_yet() {
         let err = parse("/a/b/c").expect_err("c");
         assert!(err.contains("c flag") && err.contains("not supported yet"), "{}", err);
@@ -404,7 +499,7 @@ mod tests {
     #[test]
     fn e_flag_is_parsed() {
         let sub = parse("/a/b/ge").expect("parse");
-        assert_eq!(sub.flags, Flags { global: true, quiet: true });
+        assert_eq!(sub.flags, Flags { global: true, quiet: true, ..Flags::default() });
     }
 
     #[test]

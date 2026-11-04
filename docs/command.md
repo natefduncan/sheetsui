@@ -122,9 +122,14 @@ be left out when there are no flags: `s/a/b`.
 Flags:
 
 * `g` replaces every match in the cell, not only the first.
+* `i` ignores case and `I` matches case, whatever `ignorecase` and
+  `smartcase` say. If both are given, the last one wins. A `\c` or `\C` in
+  the pattern still wins over them.
+* `n` counts the matches and changes nothing: `3 matches on 2 cells`. Without
+  `g` it counts the first match in each cell. It is not an undo step.
 * `e` gives no error when nothing matches.
 
-Flags combine, as in `s/a/b/ge`. An unknown flag is an error that names it.
+Flags combine, as in `s/a/b/ge` or `%s/x//gn`. An unknown flag is an error that names it.
 
 A range in front of `s` replaces in more than the current cell:
 

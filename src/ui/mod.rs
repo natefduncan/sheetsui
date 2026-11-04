@@ -1727,24 +1727,36 @@ impl<'ws> Workspace<'ws> {
     fn substitute(&mut self, scope: substitute::Scope, text: &str) -> Result<String, String> {
         let command = substitute::parse(text)?;
         let cells = self.substitute_cells(scope)?;
-        let case = self.case_options();
-        let (pattern, matcher) = if command.pattern.is_empty() {
-            match self.state.search.last(case) {
-                Some(last) => last.map(|(text, re)| (text.to_owned(), re.clone()))?,
+        let flags = command.flags;
+        // `i` and `I` stand in for `ignorecase` and `smartcase`.
+        let case = match flags.ignore_case {
+            Some(ignorecase) => CaseOptions { ignorecase, smartcase: false },
+            None => self.case_options(),
+        };
+        let pattern = if command.pattern.is_empty() {
+            match self.state.search.last(self.case_options()) {
+                Some(last) => last.map(|(text, _)| text.to_owned())?,
                 None => return Err("E35: No previous regular expression".to_owned()),
             }
         } else {
-            let matcher = search::compile(&command.pattern, case)?;
-            (command.pattern, matcher)
+            command.pattern
         };
-        let counts = self
-            .book
-            .substitute(&cells, &matcher, &command.replacement, command.flags.global)
-            .map_err(|e| e.to_string())?;
-        if counts.substitutions == 0 && !command.flags.quiet {
+        let matcher = search::compile(&pattern, case)?;
+        let counts = if flags.count {
+            self.book.count_substitutions(&cells, &matcher, flags.global)
+        } else {
+            self.book
+                .substitute(&cells, &matcher, &command.replacement, flags.global)
+        }
+        .map_err(|e| e.to_string())?;
+        if counts.substitutions == 0 && !flags.quiet {
             return Err(format!("E486: Pattern not found: {}", pattern));
         }
-        Ok(counts.message())
+        Ok(if flags.count {
+            counts.match_message()
+        } else {
+            counts.message()
+        })
     }
 
     /// The cells a `:s` command visits. `'<,'>` is the selection being made
