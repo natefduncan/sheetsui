@@ -224,7 +224,16 @@ remapped `j` shows its new key. Handlers with no key show nothing. A "Your
 mappings" section lists the user's mappings from `:nmap` or `:vmap`.
 
 Placeholders are expanded before the markdown is parsed, so the existing
-renderer is unchanged. An unknown group name is left in the text as a
+renderer is unchanged. Each placeholder becomes a bullet list, and two lists
+with only a blank line between them merge into one loose list that the help
+renders badly. A doc therefore puts a heading or prose between placeholders,
+and a test enforces it.
+
+A handler's keys are the built-in keys the user has not hidden, then the
+user's mappings whose right-hand side is exactly the keys of one built-in
+entry. A user `k` mapped to `j` is listed for "move down". A mapping to a
+sequence or a `<Cmd>` is only in "Your mappings". The prose around the lists
+does not follow remaps: it still says "`q` quits". An unknown group name is left in the text as a
 visible `{{keys:name}}` so a typo is noticed.
 
 ## Code

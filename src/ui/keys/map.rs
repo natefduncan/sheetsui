@@ -310,6 +310,33 @@ impl KeyMap {
     }
 }
 
+/// Wraps text in a markdown code span, with a longer fence if it holds a
+/// backtick.
+pub fn code_span(text: &str) -> String {
+    if text.contains('`') {
+        format!("`` {text} ``")
+    } else {
+        format!("`{text}`")
+    }
+}
+
+/// One bullet for each user mapping in a mode, as markdown. Empty if there are
+/// none.
+pub fn mapping_lines(mode: MapMode, keymap: &KeyMap) -> String {
+    let mut text = String::new();
+    for mapping in keymap.table(mode).mappings() {
+        let rhs = match &mapping.target {
+            Target::Replay(items) => code_span(&format_rhs(items)),
+            Target::Unmapped => "(unmapped)".to_owned(),
+        };
+        text.push_str(&format!(
+            "* {} \u{2192} {rhs}\n",
+            code_span(&format_keys(&mapping.lhs))
+        ));
+    }
+    text
+}
+
 /// The text of the `:nmap` and `:vmap` dialog, as markdown: the user's
 /// mappings in a mode, then any warnings from loading the keys file.
 pub fn listing_text(mode: MapMode, keymap: &KeyMap) -> String {
@@ -318,19 +345,12 @@ pub fn listing_text(mode: MapMode, keymap: &KeyMap) -> String {
         MapMode::RangeSelect => ("Range-select mappings", "vnoremap"),
     };
     let mut text = format!("# {title}\n\n");
-    let table = keymap.table(mode);
-    if table.is_empty() {
+    if keymap.table(mode).is_empty() {
         text.push_str(&format!(
             "No mappings. Add one with `{add} <keys> <rhs>`, or put it in the keys file.\n"
         ));
     }
-    for mapping in table.mappings() {
-        let rhs = match &mapping.target {
-            Target::Replay(items) => format!("`{}`", format_rhs(items)),
-            Target::Unmapped => "(unmapped)".to_owned(),
-        };
-        text.push_str(&format!("* `{}` \u{2192} {rhs}\n", format_keys(&mapping.lhs)));
-    }
+    text.push_str(&mapping_lines(mode, keymap));
     if let Some(path) = &keymap.loaded_from {
         text.push_str(&format!("\nKeys file: {}\n", path.display()));
     }

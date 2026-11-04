@@ -1,22 +1,17 @@
 # Navigation Mode
 
 The interface will start out in navigation mode. You can navigate around the
-table and between the sheets using the following keybinds:
+table and between the sheets using the following keybinds. Keys are written in
+vim notation: `<C-n>` is Ctrl-n, `<A-h>` is Alt-h, `<CR>` is Enter, and a
+capital letter is the shifted key.
 
 ## Cell Navigation
 
-* `h`, ⬆️, and `TAB` will move one cell to the left.
-* `l` and, ➡️ will move one cell to the right.
-* `j`, ⬇️, and `Enter` will move one cell down.
-* `k` ⬆️, will move one cell up.
-* `d` will delete the contents of the selected cell leaving style untouched
-* `D` will delete the contents of the selected cell including any style
-* `gg` will go to the top row in the current column
+{{keys:cell-navigation}}
 
 ## Sheet Navigation
 
-* `Ctrl-n` moves to the next sheet
-* `Ctrl-p` moves to the prev sheet
+{{keys:sheet-navigation}}
 
 Sheet navigation moving will loop around when you reach the ends.
 
@@ -28,17 +23,11 @@ will clear the numeric prefix if you want to cancel it.
 
 **Modifying the Sheet or Cells**
 
-* `e` or `i` will enter CellEdit mode for the current cell.
-* 'I' will toggle italic on the cell. 'B' will toggle bold.
-* `Ctrl-h` will shorten the width of the column you are on.
-* `Ctrl-l` will lengthen the width of the column you are on.
-* `o` will insert a row below the selected cell, move one cell down, and enter edit mode
-* `O` will insert a row above the selected cell, move one cell up, and enter edit mode
+{{keys:modify}}
 
 ## Undo and Redo
 
-* `u` undoes the last change. The cursor goes to the cell where the change was made.
-* `r` redoes the last change that you undid.
+{{keys:undo}}
 
 A numeric prefix undoes or redoes that many changes: `3u` undoes three.
 
@@ -53,14 +42,7 @@ open a file, and it is not saved when you quit.
 
 ## Other Keybindings
 
-* `Ctrl-r` will enter range selection mode.
-* `v` will enter range selection mode with the start of the range already selected.
-* `Ctrl-s` will save the sheet.
-* `Ctrl-c`, `y` Copy the cell or range contents.
-* `Ctrl-v`, `p` Paste into the sheet.
-* `Ctrl-Shift-C` Copy the cell or range formatted content.
-* `q` will exit the application.
-* `:` will enter CommandMode.
+{{keys:other}}
 
 Range selections made from navigation mode will be available to paste into a Cell Edit.
 

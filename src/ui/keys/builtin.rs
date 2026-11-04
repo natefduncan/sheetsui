@@ -9,6 +9,16 @@ use crossterm::event::{KeyCode, KeyModifiers};
 
 use super::{format_keys, parse_keys, Key};
 
+/// What the help needs to know about a handler enum.
+pub trait HandlerInfo: Copy + PartialEq + 'static {
+    /// Every handler, in declaration order.
+    fn all() -> &'static [Self];
+    /// The help group the handler is listed under.
+    fn group_name(self) -> &'static str;
+    /// A short description for the help.
+    fn describe(self) -> &'static str;
+}
+
 macro_rules! handlers {
     ($(#[$meta:meta])* $name:ident { $($variant:ident => ($group:literal, $desc:literal)),+ $(,)? }) => {
         $(#[$meta])*
@@ -35,6 +45,20 @@ macro_rules! handlers {
                 }
             }
         }
+
+        impl HandlerInfo for $name {
+            fn all() -> &'static [Self] {
+                $name::ALL
+            }
+
+            fn group_name(self) -> &'static str {
+                self.group()
+            }
+
+            fn describe(self) -> &'static str {
+                self.description()
+            }
+        }
     };
 }
 
@@ -58,7 +82,7 @@ handlers! {
         ColWider => ("modify", "lengthen the width of the column"),
         InsertRowBelow => ("modify", "insert a row below, move down and edit"),
         InsertRowAbove => ("modify", "insert a row above, move up and edit"),
-        Undo => ("undo", "undo the last change"),
+        Undo => ("undo", "undo the last change, and go to the cell it was made in"),
         Redo => ("undo", "redo the last change that was undone"),
         EnterRangeSelect => ("other", "enter range selection mode"),
         EnterVisual => ("other", "enter range selection mode with the start selected"),

@@ -2,8 +2,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{
     builtin::{self, Lookup, NavHandler, RangeHandler},
-    command, file,
+    command, file, help,
     map::{
+        code_span,
         listing_text,
         format_rhs, parse_rhs, resolve, resolve_timeout, KeyMap, MapCommand, MapMode, Resolution,
         RhsItem, Target, UserLookup, UserTable,
@@ -894,4 +895,261 @@ fn the_listing_prints_commands_in_a_right_hand_side() {
     let (map, _) = load("nnoremap <Space>s <Cmd>sort skip 1<CR>\n");
     let text = listing_text(MapMode::Navigate, &map);
     assert!(text.contains("`<Cmd>sort skip 1<CR>`"), "{text}");
+}
+
+fn defaults() -> UserTable {
+    UserTable::default()
+}
+
+fn shown(keys: Vec<Vec<Key>>) -> Vec<String> {
+    keys.iter().map(|k| format_keys(k)).collect()
+}
+
+fn nav_keys(user: &UserTable, handler: NavHandler) -> Vec<String> {
+    shown(help::keys_for(builtin::navigation(), user, handler))
+}
+
+#[test]
+fn a_handler_lists_its_built_in_keys_in_table_order() {
+    assert_eq!(
+        vec!["j", "<Down>", "<CR>"],
+        nav_keys(&defaults(), NavHandler::MoveDown)
+    );
+    assert_eq!(vec!["gg"], nav_keys(&defaults(), NavHandler::MoveTop));
+    assert_eq!(vec!["<C-s>"], nav_keys(&defaults(), NavHandler::Save));
+}
+
+#[test]
+fn swapping_keys_swaps_the_help() {
+    let user = user_table(&[("j", "k"), ("k", "j")]);
+    assert_eq!(vec!["<Down>", "<CR>", "k"], nav_keys(&user, NavHandler::MoveDown));
+    assert_eq!(vec!["<Up>", "<S-CR>", "j"], nav_keys(&user, NavHandler::MoveUp));
+}
+
+#[test]
+fn an_unmapped_built_in_disappears_from_the_help() {
+    let mut user = UserTable::default();
+    user.insert(keys("q"), Target::Unmapped);
+    assert_eq!(Vec::<String>::new(), nav_keys(&user, NavHandler::Quit));
+    let text = help::group_text(builtin::navigation(), &user, "other").unwrap();
+    assert!(!text.contains("quit"), "{text}");
+    assert!(text.contains("save the sheet"), "{text}");
+}
+
+#[test]
+fn a_user_mapping_to_one_built_in_key_is_listed_for_it() {
+    let user = user_table(&[("<Space>", "<C-s>"), ("<C-w>", "<C-n>")]);
+    assert_eq!(vec!["<C-s>", "<Space>"], nav_keys(&user, NavHandler::Save));
+    assert_eq!(vec!["<C-n>", "<C-w>"], nav_keys(&user, NavHandler::NextSheet));
+}
+
+#[test]
+fn a_user_mapping_to_a_sequence_or_a_command_is_not_attributed() {
+    let user = user_table(&[("<Space>c", "yj"), ("<Space>w", "<Cmd>write<CR>"), ("z", "gg")]);
+    for handler in NavHandler::ALL {
+        for key in nav_keys(&user, *handler) {
+            assert!(
+                !["<Space>c", "<Space>w"].contains(&key.as_str()),
+                "{key} listed for {handler:?}"
+            );
+        }
+    }
+    // `gg` is a sequence that is exactly one built-in entry, so it counts.
+    assert_eq!(vec!["gg", "z"], nav_keys(&user, NavHandler::MoveTop));
+}
+
+#[test]
+fn a_user_key_is_not_listed_twice() {
+    // The user's `j` replaces the built-in `j`, and is listed after the others.
+    let user = user_table(&[("j", "j")]);
+    assert_eq!(vec!["<Down>", "<CR>", "j"], nav_keys(&user, NavHandler::MoveDown));
+}
+
+#[test]
+fn mapping_g_hides_gg_and_mapping_gg_restores_it() {
+    let user = user_table(&[("g", "jj")]);
+    assert_eq!(Vec::<String>::new(), nav_keys(&user, NavHandler::MoveTop));
+    let user = user_table(&[("g", "jj"), ("gg", "gg")]);
+    assert_eq!(vec!["gg"], nav_keys(&user, NavHandler::MoveTop));
+}
+
+#[test]
+fn a_user_mapping_that_continues_from_g_leaves_gg_alone() {
+    let user = user_table(&[("gt", "l")]);
+    assert_eq!(vec!["gg"], nav_keys(&user, NavHandler::MoveTop));
+    // But one that extends gg itself hides it: gg waits for more keys.
+    let user = user_table(&[("ggx", "l")]);
+    assert_eq!(Vec::<String>::new(), nav_keys(&user, NavHandler::MoveTop));
+}
+
+#[test]
+fn range_select_help_uses_the_range_table_and_mappings() {
+    let mut user = UserTable::default();
+    user.insert(keys("z"), replay("y"));
+    let keys = shown(help::keys_for(builtin::range_select(), &user, RangeHandler::CopyFormatted));
+    assert_eq!(vec!["<C-c>", "y", "z"], keys);
+}
+
+#[test]
+fn a_group_lists_its_handlers_with_keys_and_descriptions() {
+    let text = help::group_text(builtin::navigation(), &defaults(), "cell-navigation").unwrap();
+    assert!(
+        text.contains("* `h`, `<Left>`, `<S-Tab>`: move one cell to the left\n"),
+        "{text}"
+    );
+    assert!(text.contains("* `gg`: go to the top row in the current column\n"), "{text}");
+}
+
+#[test]
+fn an_unknown_group_is_none() {
+    assert_eq!(None, help::group_text(builtin::navigation(), &defaults(), "nope"));
+    // A range-select group is not a navigation group.
+    assert_eq!(None, help::group_text(builtin::navigation(), &defaults(), "movement"));
+}
+
+#[test]
+fn the_groups_of_a_mode() {
+    assert_eq!(
+        vec!["cell-navigation", "sheet-navigation", "modify", "undo", "other"],
+        help::groups(MapMode::Navigate)
+    );
+    assert_eq!(vec!["movement", "selection", "other"], help::groups(MapMode::RangeSelect));
+}
+
+#[test]
+fn expand_replaces_placeholders_and_keeps_the_rest() {
+    let text = "# Title\n\nSome prose.\n\n  {{keys:undo}}  \n\nMore prose.\n";
+    let out = help::expand(text, MapMode::Navigate, &KeyMap::default());
+    assert!(out.starts_with("# Title\n\nSome prose.\n\n* `u`: undo the last change"), "{out}");
+    assert!(out.contains("* `r`: redo the last change that was undone\n"), "{out}");
+    assert!(out.ends_with("\nMore prose.\n"), "{out}");
+    assert!(!out.contains("{{"), "{out}");
+}
+
+#[test]
+fn expand_leaves_a_typo_visible() {
+    let out = help::expand("{{keys:undoo}}\n", MapMode::Navigate, &KeyMap::default());
+    assert_eq!("{{keys:undoo}}\n", out);
+}
+
+#[test]
+fn expand_with_no_mappings_adds_nothing() {
+    let out = help::expand("prose\n", MapMode::Navigate, &KeyMap::default());
+    assert_eq!("prose\n", out);
+}
+
+#[test]
+fn expand_adds_your_mappings() {
+    let mut map = KeyMap::default();
+    map.apply(parsed("nnoremap <Space>c yj")).unwrap();
+    map.apply(parsed("nunmap q")).unwrap();
+    map.apply(parsed("vnoremap z j")).unwrap();
+    let out = help::expand("prose\n", MapMode::Navigate, &map);
+    assert!(out.contains("## Your mappings"), "{out}");
+    assert!(out.contains("* `<Space>c` \u{2192} `yj`"), "{out}");
+    assert!(out.contains("* `q` \u{2192} (unmapped)"), "{out}");
+    assert!(!out.contains("`z`"), "range mappings are not navigation mappings: {out}");
+    let out = help::expand("prose\n", MapMode::RangeSelect, &map);
+    assert!(out.contains("* `z` \u{2192} `j`"), "{out}");
+}
+
+#[test]
+fn expand_follows_the_live_table() {
+    let mut map = KeyMap::default();
+    map.apply(parsed("nnoremap k j")).unwrap();
+    map.apply(parsed("nnoremap j k")).unwrap();
+    let out = help::expand("{{keys:cell-navigation}}\n", MapMode::Navigate, &map);
+    assert!(out.contains("* `<Down>`, `<CR>`, `k`: move one cell down\n"), "{out}");
+    assert!(out.contains("* `<Up>`, `<S-CR>`, `j`: move one cell up\n"), "{out}");
+}
+
+#[test]
+fn a_backtick_key_gets_a_longer_fence() {
+    assert_eq!("`j`", code_span("j"));
+    assert_eq!("`` ` ``", code_span("`"));
+}
+
+fn placeholders(doc: &str) -> Vec<String> {
+    doc.lines()
+        .filter_map(|l| {
+            l.trim()
+                .strip_prefix("{{keys:")
+                .and_then(|r| r.strip_suffix("}}"))
+                .map(str::to_owned)
+        })
+        .collect()
+}
+
+#[test]
+fn the_navigation_doc_uses_every_navigation_group() {
+    let used = placeholders(include_str!("../../../docs/navigation.md"));
+    for group in &used {
+        assert!(help::groups(MapMode::Navigate).contains(&group.as_str()), "unknown group {group}");
+    }
+    for group in help::groups(MapMode::Navigate) {
+        assert!(used.iter().any(|u| u == group), "docs/navigation.md never lists {group}");
+    }
+}
+
+#[test]
+fn the_visual_doc_uses_every_range_select_group() {
+    let used = placeholders(include_str!("../../../docs/visual.md"));
+    for group in &used {
+        assert!(help::groups(MapMode::RangeSelect).contains(&group.as_str()), "unknown group {group}");
+    }
+    for group in help::groups(MapMode::RangeSelect) {
+        assert!(used.iter().any(|u| u == group), "docs/visual.md never lists {group}");
+    }
+}
+
+#[test]
+fn the_docs_expand_without_a_leftover_placeholder() {
+    for (doc, mode) in [
+        (include_str!("../../../docs/navigation.md"), MapMode::Navigate),
+        (include_str!("../../../docs/visual.md"), MapMode::RangeSelect),
+    ] {
+        let out = help::expand(doc, mode, &KeyMap::default());
+        assert!(!out.contains("{{keys:"), "{out}");
+    }
+}
+
+#[test]
+fn every_handler_shows_up_in_the_default_help() {
+    for (doc, mode) in [
+        (include_str!("../../../docs/navigation.md"), MapMode::Navigate),
+        (include_str!("../../../docs/visual.md"), MapMode::RangeSelect),
+    ] {
+        let out = help::expand(doc, mode, &KeyMap::default());
+        let descriptions: Vec<&str> = match mode {
+            MapMode::Navigate => NavHandler::ALL.iter().map(|h| h.description()).collect(),
+            MapMode::RangeSelect => RangeHandler::ALL.iter().map(|h| h.description()).collect(),
+        };
+        for description in descriptions {
+            assert!(out.contains(description), "{description:?} is missing from the {mode:?} help");
+        }
+    }
+}
+
+#[test]
+fn no_two_placeholders_are_back_to_back() {
+    // Lists with only a blank line between them merge into one loose list in
+    // markdown, which the help renders badly.
+    for doc in [
+        include_str!("../../../docs/navigation.md"),
+        include_str!("../../../docs/visual.md"),
+    ] {
+        let mut previous_was_placeholder = false;
+        for line in doc.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let is_placeholder = trimmed.starts_with("{{keys:");
+            assert!(
+                !(is_placeholder && previous_was_placeholder),
+                "two placeholders with nothing between them in:\n{doc}"
+            );
+            previous_was_placeholder = is_placeholder;
+        }
+    }
 }

@@ -528,11 +528,11 @@ impl<'ws> Workspace<'ws> {
         // Ideally we would also render the markdown content properly.
         // https://github.com/zaphar/sheetsui/issues/22
         match self.state.modality() {
-            Modality::Navigate => help::to_widget("navigate", &self.state.theme),
-            Modality::CellEdit => help::to_widget("edit", &self.state.theme),
-            Modality::Command => help::to_widget("command", &self.state.theme),
-            Modality::RangeSelect => help::to_widget("visual", &self.state.theme),
-            _ => help::to_widget("", &self.state.theme),
+            Modality::Navigate => help::to_widget("navigate", &self.state.theme, &self.state.keymap),
+            Modality::CellEdit => help::to_widget("edit", &self.state.theme, &self.state.keymap),
+            Modality::Command => help::to_widget("command", &self.state.theme, &self.state.keymap),
+            Modality::RangeSelect => help::to_widget("visual", &self.state.theme, &self.state.keymap),
+            _ => help::to_widget("", &self.state.theme, &self.state.keymap),
         }
     }
 
@@ -681,7 +681,7 @@ impl<'ws> Workspace<'ws> {
                 Ok(None)
             }
             Ok(Some(Cmd::Help(maybe_topic))) => {
-                self.enter_dialog_mode(help::to_widget(maybe_topic.unwrap_or(""), &self.state.theme));
+                self.enter_dialog_mode(help::to_widget(maybe_topic.unwrap_or(""), &self.state.theme, &self.state.keymap));
                 Ok(None)
             }
             Ok(Some(Cmd::Theme(maybe_name))) => {

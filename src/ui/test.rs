@@ -1137,6 +1137,69 @@ fn test_a_mapping_can_list_mappings() {
     assert_eq!(&Modality::Dialog, ws.state.modality());
 }
 
+fn help_line(ws: &Workspace, needle: &str) -> String {
+    popup_text(ws)
+        .lines()
+        .find(|l| l.contains(needle))
+        .unwrap_or_else(|| panic!("no line with {needle:?} in:\n{}", popup_text(ws)))
+        .to_owned()
+}
+
+#[test]
+fn test_navigation_help_lists_the_current_keys() {
+    let mut ws = new_workspace();
+    script().alt('h').run(&mut ws).expect("Failed to run script");
+    assert_eq!(&Modality::Dialog, ws.state.modality());
+    let line = help_line(&ws, "move one cell down");
+    assert!(line.contains('j') && line.contains("<Down>") && line.contains("<CR>"), "{line}");
+    assert!(!popup_text(&ws).contains("{{keys:"));
+    assert!(!popup_text(&ws).contains("Your mappings"));
+}
+
+#[test]
+fn test_navigation_help_follows_a_remap() {
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "k", "j");
+    map_nav(&mut ws, "j", "k");
+    script().alt('h').run(&mut ws).expect("Failed to run script");
+    let down = help_line(&ws, "move one cell down");
+    assert!(down.contains("<Down>") && down.contains('k') && !down.contains('j'), "{down}");
+    let up = help_line(&ws, "move one cell up");
+    assert!(up.contains("<Up>") && up.contains('j') && !up.contains('k'), "{up}");
+    assert!(popup_text(&ws).contains("Your mappings"));
+}
+
+#[test]
+fn test_navigation_help_hides_an_unmapped_key() {
+    let mut ws = new_workspace();
+    type_command(&mut ws, "nunmap q");
+    script().alt('h').run(&mut ws).expect("Failed to run script");
+    // The prose still says "`q` quits"; the generated bullet is gone.
+    assert!(!popup_text(&ws).contains(": quit"), "{}", popup_text(&ws));
+    assert!(popup_text(&ws).contains("save the sheet"));
+}
+
+#[test]
+fn test_range_select_help_uses_the_range_keys() {
+    let mut ws = new_workspace();
+    map_range(&mut ws, "z", "y");
+    script().char('v').alt('h').run(&mut ws).expect("Failed to run script");
+    assert_eq!(&Modality::Dialog, ws.state.modality());
+    let line = help_line(&ws, "copy the range as it is displayed");
+    assert!(line.contains('y') && line.contains('z'), "{line}");
+    assert!(popup_text(&ws).contains("Your mappings"));
+}
+
+#[test]
+fn test_help_command_expands_the_topic() {
+    let mut ws = new_workspace();
+    type_command(&mut ws, "nnoremap <Space> jj");
+    type_command(&mut ws, "help navigate");
+    assert_eq!(&Modality::Dialog, ws.state.modality());
+    assert!(popup_text(&ws).contains("move one cell down"));
+    assert!(popup_text(&ws).contains("<Space>"));
+}
+
 macro_rules! assert_help_dialog {
     ($exit : expr) => {{
         let mut ws = new_workspace();
