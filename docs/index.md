@@ -17,6 +17,7 @@ Options:
   -t, --timezone-name <TIMEZONE_NAME>  [default: America/New_York]
       --log-input <LOG_INPUT>
       --theme <THEME>                  A theme name or a path to a theme file
+      --keys <KEYS>                    A keys file of `nnoremap` and `nunmap` lines, instead of the one in the config directory
   -h, --help                           Print help
   -V, --version                        Print version
 ```
@@ -55,6 +56,7 @@ get some context sensitive help.
 * [Visual](./visual.md)
 * [Command](./command.md)
 
-### Appearance
+### Customizing
 
 * [Themes](./themes.md)
+* [Key Mappings](./keys.md)

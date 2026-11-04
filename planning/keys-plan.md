@@ -159,9 +159,15 @@ Replace the `match` in `handle_navigation_input` and
   and timeout rules, shadowing, replay, the out-of-scope list from the design
   in plain terms, and a worked `keys` file.
 - Add `:nnoremap`, `:vnoremap`, `:nunmap`, `:vunmap`, `:nmap`, `:vmap` to
-  `docs/command.md`, and a `keys` topic to `docs/index.md` and the help
-  topics.
-- Update `README.md` and `CONTRIBUTING.md` where they list keys or files.
+  `docs/command.md`, a `keys` topic to `docs/index.md` and the help topics,
+  and `--keys` to the usage block. `README.md` and `CONTRIBUTING.md` list no
+  keys or files, so they are unchanged.
+- The help renderer joined the lines of a fenced code block into one line,
+  which made the examples unreadable (and broke the two blocks in
+  `docs/themes.md`). Each line of a code block is now its own line, indented
+  two spaces.
+- Tests load every ```` ```keys ```` block in `docs/keys.md` and require no
+  warnings, so the examples cannot rot.
 
 ## Out of scope
 

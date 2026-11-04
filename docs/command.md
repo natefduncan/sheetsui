@@ -43,6 +43,9 @@ The currently supported commands are:
 * `sort [skip <N>] [<column> [asc|desc] ...]` Sort rows. See Sorting below.
 * `undo` Undo the last change, the same as `u` in navigation mode.
 * `redo` Redo the last change that you undid, the same as `r` in navigation mode.
+* `nnoremap <keys> <rhs>` map keys in navigation mode. `vnoremap` does the same for range select mode. The right-hand side is keys, or `<Cmd>command<CR>`. See [Key Mappings](./keys.md).
+* `nunmap <keys>` remove a navigation mode mapping, or turn off a built-in key. `vunmap` does the same for range select mode.
+* `nmap` list your navigation mode mappings and the warnings from loading the keys file. `vmap` lists the range select ones.
 
 ## Sorting
 

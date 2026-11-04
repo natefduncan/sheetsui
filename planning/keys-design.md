@@ -1,10 +1,10 @@
 # Design: Key Mappings
 
-Status: proposed 2026-11-03 — decisions K1–K15. Implementation plan:
+Status: implemented 2026-11-04 — decisions K1–K15. Implementation plan:
 `planning/keys-plan.md`.
 
 K1–K11 were agreed in a design interview. K12–K15 are defaults chosen while
-writing this up. They are marked, and need a yes or no.
+writing this up, and were accepted.
 
 ## User
 

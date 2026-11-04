@@ -1153,3 +1153,58 @@ fn no_two_placeholders_are_back_to_back() {
         }
     }
 }
+
+/// The fenced blocks tagged `keys` in a doc, each as one keys file.
+fn keys_blocks(doc: &str) -> Vec<String> {
+    let mut blocks = Vec::new();
+    let mut current: Option<String> = None;
+    for line in doc.lines() {
+        match (&mut current, line.trim_end()) {
+            (None, "```keys") => current = Some(String::new()),
+            (Some(_), "```") => blocks.extend(current.take()),
+            (Some(block), text) => {
+                block.push_str(text);
+                block.push('\n');
+            }
+            (None, _) => {}
+        }
+    }
+    blocks
+}
+
+#[test]
+fn the_keys_doc_examples_load_without_warnings() {
+    let blocks = keys_blocks(include_str!("../../../docs/keys.md"));
+    assert!(blocks.len() >= 3, "expected the examples in docs/keys.md, found {}", blocks.len());
+    for block in blocks {
+        let (map, warnings) = load(&block);
+        assert_eq!(Vec::<(usize, String)>::new(), warnings, "in:\n{block}");
+        assert!(!map.nav.is_empty() || !map.range.is_empty(), "no mappings in:\n{block}");
+    }
+}
+
+#[test]
+fn the_keys_doc_names_every_named_key() {
+    let doc = include_str!("../../../docs/keys.md");
+    for (_, code) in super::NAMES {
+        let printed = Key::plain(*code).to_string();
+        if printed.starts_with('<') {
+            assert!(doc.contains(&printed), "docs/keys.md does not mention {printed}");
+        }
+    }
+    for n in [1, 12] {
+        assert!(doc.contains(&format!("<F{n}>")), "docs/keys.md does not mention <F{n}>");
+    }
+}
+
+#[test]
+fn the_docs_cover_the_commands_and_the_flag() {
+    let commands = include_str!("../../../docs/command.md");
+    let keys = include_str!("../../../docs/keys.md");
+    for name in ["nnoremap", "vnoremap", "nunmap", "vunmap", "nmap", "vmap"] {
+        assert!(commands.contains(&format!("`{name}")), "docs/command.md lacks {name}");
+        assert!(keys.contains(&format!("`{name}")), "docs/keys.md lacks {name}");
+    }
+    assert!(include_str!("../../../docs/index.md").contains("--keys <KEYS>"));
+    assert!(include_str!("../../../docs/intro.md").contains("`help keys`"));
+}

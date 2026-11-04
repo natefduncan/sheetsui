@@ -1200,6 +1200,16 @@ fn test_help_command_expands_the_topic() {
     assert!(popup_text(&ws).contains("<Space>"));
 }
 
+#[test]
+fn test_help_keys_opens_the_key_mappings_doc() {
+    let mut ws = new_workspace();
+    type_command(&mut ws, "help keys");
+    assert_eq!(&Modality::Dialog, ws.state.modality());
+    let text = popup_text(&ws);
+    assert!(text.contains("Key Mappings"), "{text}");
+    assert!(text.contains("nnoremap j k"), "{text}");
+}
+
 macro_rules! assert_help_dialog {
     ($exit : expr) => {{
         let mut ws = new_workspace();

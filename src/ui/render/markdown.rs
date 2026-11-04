@@ -251,10 +251,24 @@ impl Markdown {
                         }
                     }
 
-                    // Add the text with appropriate styling
-                    current_line
-                        .spans
-                        .push(Span::styled(text.to_string(), style));
+                    if state_stack.iter().any(|s| matches!(s, MarkdownState::Code)) {
+                        // A code block arrives as one text with newlines in it. A
+                        // span cannot hold a line break, so each line is its own.
+                        for segment in text.split_inclusive('\n') {
+                            current_line
+                                .spans
+                                .push(Span::styled(format!("  {}", segment.trim_end_matches('\n')), style));
+                            if segment.ends_with('\n') {
+                                lines.push(current_line);
+                                current_line = Line::default();
+                            }
+                        }
+                    } else {
+                        // Add the text with appropriate styling
+                        current_line
+                            .spans
+                            .push(Span::styled(text.to_string(), style));
+                    }
                 }
                 Event::SoftBreak => {
                     current_line.spans.push(Span::raw(" "));
@@ -506,6 +520,27 @@ mod tests {
         
         assert_eq!(text.lines[2].spans[0].content, "2. ");
         assert_eq!(text.lines[2].spans[1].content, "Second");
+    }
+
+    #[test]
+    fn test_a_code_block_keeps_its_lines() {
+        let md = Markdown::from_str("Before\n\n```\nfirst line\n\nthird line\n```\n\nAfter");
+        let lines: Vec<String> = md.get_text().lines.iter().map(|l| l.to_string()).collect();
+        let first = lines.iter().position(|l| l == "  first line").expect("first line");
+        assert_eq!("  ", lines[first + 1], "the blank line in the block is kept");
+        assert_eq!("  third line", lines[first + 2]);
+        assert!(lines.contains(&"Before".to_owned()));
+        assert!(lines.contains(&"After".to_owned()));
+        // Nothing of the block is joined to the text after it.
+        assert!(!lines.iter().any(|l| l.contains("third lineAfter")));
+    }
+
+    #[test]
+    fn test_a_fenced_block_with_a_language_keeps_its_lines() {
+        let md = Markdown::from_str("```keys\nnnoremap j k\nnnoremap k j\n```");
+        let lines: Vec<String> = md.get_text().lines.iter().map(|l| l.to_string()).collect();
+        assert!(lines.contains(&"  nnoremap j k".to_owned()), "{lines:?}");
+        assert!(lines.contains(&"  nnoremap k j".to_owned()), "{lines:?}");
     }
 
     #[test]

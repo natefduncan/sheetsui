@@ -19,6 +19,7 @@ pub fn to_widget(topic: &str, theme: &Theme, keymap: &KeyMap) -> Markdown {
         }
         "edit" => Markdown::from_str_themed(include_str!("../../../docs/edit.md"), theme),
         "command" => Markdown::from_str_themed(include_str!("../../../docs/command.md"), theme),
+        "keys" => Markdown::from_str_themed(include_str!("../../../docs/keys.md"), theme),
         "themes" => Markdown::from_str_themed(include_str!("../../../docs/themes.md"), theme),
         "visual" => {
             let text = expand(
