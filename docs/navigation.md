@@ -67,10 +67,18 @@ backward). See [Options](./command.md#options). A pattern with no match says
 `E486: Pattern not found` and leaves the cursor where it is. `Esc` closes the
 prompt without searching.
 
-The pattern is a regular expression in the syntax of Rust's `regex` crate, and
-is case-sensitive. It is close to vim's "very magic" `\v` mode: write `(a|b)`,
-not `\(a\|b\)`, `a+`, not `a\+`, and `\.` for a literal dot. A pattern that
-does not parse shows why on the message line.
+The pattern is a regular expression in the syntax of Rust's `regex` crate. It
+is close to vim's "very magic" `\v` mode: write `(a|b)`, not `\(a\|b\)`, `a+`,
+not `a\+`, and `\.` for a literal dot. A pattern that does not parse shows why
+on the message line.
+
+A search matches case unless you `:set ignorecase`. With `:set smartcase` as
+well, a pattern with an uppercase letter in it matches case again: `apple`
+finds `APPLE`, but `Apple` does not. `\c` anywhere in a pattern ignores case
+and `\C` matches case, whatever the options say; if a pattern has both, `\c`
+wins. They are not part of what is matched: `/apple\c` searches for `apple`.
+Changing an option after a search changes what `n` and `N` find. See
+[Options](./command.md#options).
 
 A merged cell is searched once, as its top-left cell. An array formula is
 searched once, as the cell that holds the formula.

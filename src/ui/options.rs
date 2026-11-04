@@ -25,11 +25,23 @@ pub struct Spec {
 }
 
 /// Every option there is.
-pub const OPTIONS: &[Spec] = &[Spec {
-    name: "wrapscan",
-    short: Some("ws"),
-    kind: Kind::Bool(true),
-}];
+pub const OPTIONS: &[Spec] = &[
+    Spec {
+        name: "wrapscan",
+        short: Some("ws"),
+        kind: Kind::Bool(true),
+    },
+    Spec {
+        name: "ignorecase",
+        short: Some("ic"),
+        kind: Kind::Bool(false),
+    },
+    Spec {
+        name: "smartcase",
+        short: Some("scs"),
+        kind: Kind::Bool(false),
+    },
+];
 
 /// The current value of an option.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +82,18 @@ impl Options {
     /// Whether a search wraps around the end of the sheet.
     pub fn wrapscan(&self) -> bool {
         self.flag("wrapscan")
+    }
+
+    /// Whether a pattern ignores case, unless `\c`, `\C` or `smartcase` say
+    /// otherwise.
+    pub fn ignorecase(&self) -> bool {
+        self.flag("ignorecase")
+    }
+
+    /// Whether, with `ignorecase`, a pattern with an uppercase letter matches
+    /// case.
+    pub fn smartcase(&self) -> bool {
+        self.flag("smartcase")
     }
 
     /// The value of a boolean option. Panics on a name not in the table,
@@ -209,6 +233,9 @@ mod test {
     fn options_start_at_their_defaults() {
         let o = Options::default();
         assert!(o.wrapscan());
+        assert!(!o.ignorecase());
+        assert!(!o.smartcase());
+        assert_eq!(Some(Value::Bool(false)), o.get("scs"));
         let o = options();
         assert_eq!(Some(Value::Bool(false)), o.get("ic"));
         assert_eq!(Some(Value::Choice("value")), o.get("searchin"));

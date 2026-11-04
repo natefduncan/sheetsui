@@ -103,6 +103,14 @@ The options are:
 * `wrapscan` (`ws`), on or off, default on. A search that passes the end of
   the sheet goes on from the other end. Off, it stops there and says `E385`.
   See [Navigation](./navigation.md).
+* `ignorecase` (`ic`), on or off, default off. A search ignores case: `apple`
+  finds `Apple` and `APPLE`.
+* `smartcase` (`scs`), on or off, default off. With `ignorecase` on, a pattern
+  that has an uppercase letter matches case after all. On its own it does
+  nothing. A letter after a backslash, as in `\S`, does not count.
+
+`\c` and `\C` in a pattern beat both options. See
+[Navigation](./navigation.md#search).
 
 <aside>Note that in the case of `quit` and `edit` that we do not currently
 prompt you if the current spreadsheet has not been saved yet. So your changes

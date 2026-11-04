@@ -3553,7 +3553,10 @@ fn test_set_shows_and_changes_wrapscan() {
     run_command(&mut ws, "set nowrapscan");
     assert!(!ws.state.options.wrapscan());
     run_command(&mut ws, "set");
-    assert_eq!(Some("nowrapscan".to_owned()), last_message(&ws));
+    assert_eq!(
+        Some("nowrapscan  noignorecase  nosmartcase".to_owned()),
+        last_message(&ws)
+    );
     run_command(&mut ws, "set ws!");
     assert!(ws.state.options.wrapscan());
 }
@@ -3605,3 +3608,70 @@ fn test_nowrapscan_stops_at_the_top_going_backward() {
         last_message(&ws)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Search: ignorecase, smartcase, \c and \C
+// ---------------------------------------------------------------------------
+
+/// A workspace with `apple` at A1, `Apple` at B1 and `APPLE` at C1, cursor on
+/// A1.
+fn case_workspace<'a>() -> Workspace<'a> {
+    let book = book::Book::from_csv_reader("apple,Apple,APPLE\n".as_bytes(), None)
+        .expect("csv");
+    Workspace::new(book, std::path::PathBuf::from("case.sui"))
+}
+
+#[test]
+fn test_search_matches_case_by_default() {
+    let mut ws = case_workspace();
+    script().char('/').chars("apple").enter().run(&mut ws).expect("run");
+    // The only match is A1 itself, found again after wrapping.
+    assert_eq!((1, 1), at(&ws));
+}
+
+#[test]
+fn test_ignorecase_finds_every_case() {
+    let mut ws = case_workspace();
+    run_command(&mut ws, "set ic");
+    script().char('/').chars("apple").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+}
+
+#[test]
+fn test_smartcase_matches_case_with_an_uppercase_letter() {
+    let mut ws = case_workspace();
+    run_command(&mut ws, "set ic scs");
+    script().char('/').chars("Apple").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    // All lowercase still ignores case.
+    script().char('/').chars("apple").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+}
+
+#[test]
+fn test_case_atoms_override_the_options() {
+    let mut ws = case_workspace();
+    script().char('/').chars("APPLE\\c").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    run_command(&mut ws, "set ic");
+    script().char('/').chars("\\Capple").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+}
+
+#[test]
+fn test_changing_ignorecase_after_a_search_changes_n() {
+    let mut ws = case_workspace();
+    script().char('/').chars("apple").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    run_command(&mut ws, "set ic");
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    run_command(&mut ws, "set noic");
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+}
+

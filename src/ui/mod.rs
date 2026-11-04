@@ -40,7 +40,7 @@ use keys::{
 };
 pub use history::CommandHistory;
 use options::Options;
-use search::SearchState;
+use search::{CaseOptions, SearchState};
 use theme::{lookup, parse::Warning, Slot, Theme};
 use render::{markdown::Markdown, viewport::ViewportState};
 
@@ -1426,7 +1426,8 @@ impl<'ws> Workspace<'ws> {
         *self.state.search_prompt.status_mut() = Status::Done;
         self.state.pop_modality();
         if !pattern.is_empty() {
-            if let Err(msg) = self.state.search.set_pattern(&pattern) {
+            let case = self.case_options();
+            if let Err(msg) = self.state.search.set_pattern(&pattern, case) {
                 self.set_message(MessageLevel::Error, msg);
                 return Ok(None);
             }
@@ -1451,12 +1452,20 @@ impl<'ws> Workspace<'ws> {
     /// `direction`. A miss or a wrap is reported on the message line; a miss
     /// leaves the cursor where it was.
     fn search_next(&mut self, direction: Direction, count: usize) {
-        let Some((pattern, matcher)) = self.state.search.last() else {
-            self.set_message(
-                MessageLevel::Error,
-                "E35: No previous regular expression".to_owned(),
-            );
-            return;
+        let case = self.case_options();
+        let (pattern, matcher) = match self.state.search.last(case) {
+            Some(Ok(last)) => last,
+            Some(Err(msg)) => {
+                self.set_message(MessageLevel::Error, msg);
+                return;
+            }
+            None => {
+                self.set_message(
+                    MessageLevel::Error,
+                    "E35: No previous regular expression".to_owned(),
+                );
+                return;
+            }
         };
         let wrapscan = self.state.options.wrapscan();
         let mut from = self.book.location.clone();
@@ -1506,6 +1515,14 @@ impl<'ws> Workspace<'ws> {
                 self.set_message(MessageLevel::Error, text);
             }
             Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
+        }
+    }
+
+    /// The case options a pattern is compiled with.
+    fn case_options(&self) -> CaseOptions {
+        CaseOptions {
+            ignorecase: self.state.options.ignorecase(),
+            smartcase: self.state.options.smartcase(),
         }
     }
 
