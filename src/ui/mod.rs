@@ -22,6 +22,7 @@ use ratatui_textarea::{CursorMove, TextArea};
 mod cmd;
 mod help;
 mod history;
+mod options;
 // Parts are not used until the later stages of planning/keys-plan.md.
 #[allow(dead_code)]
 pub mod keys;
@@ -38,6 +39,7 @@ use keys::{
     Key,
 };
 pub use history::CommandHistory;
+use options::Options;
 use search::SearchState;
 use theme::{lookup, parse::Warning, Slot, Theme};
 use render::{markdown::Markdown, viewport::ViewportState};
@@ -121,6 +123,8 @@ pub struct AppState<'ws> {
     pub search_prompt: TextState<'ws>,
     /// The last search, for `n`.
     pub search: SearchState,
+    /// The `:set` options, for this session only.
+    pub options: Options,
     pub numeric_prefix: Vec<char>,
     /// Keys typed so far that are the start of a longer key sequence.
     pub pending_keys: Vec<Key>,
@@ -148,6 +152,7 @@ impl<'ws> Default for AppState<'ws> {
             command_history: Default::default(),
             search_prompt: Default::default(),
             search: Default::default(),
+            options: Default::default(),
             numeric_prefix: Default::default(),
             pending_keys: Default::default(),
             keymap: Default::default(),
@@ -712,6 +717,14 @@ impl<'ws> Workspace<'ws> {
                 match maybe_name {
                     Some(name) => self.switch_theme(name),
                     None => self.enter_dialog_mode(self.theme_listing()),
+                }
+                Ok(None)
+            }
+            Ok(Some(Cmd::Set(args))) => {
+                match self.state.options.set(args) {
+                    Ok(Some(text)) => self.set_message(MessageLevel::Info, text),
+                    Ok(None) => {}
+                    Err(text) => self.set_message(MessageLevel::Error, text),
                 }
                 Ok(None)
             }
@@ -1445,6 +1458,7 @@ impl<'ws> Workspace<'ws> {
             );
             return;
         };
+        let wrapscan = self.state.options.wrapscan();
         let mut from = self.book.location.clone();
         let mut found = Ok(None);
         let mut wrapped = false;
@@ -1452,7 +1466,7 @@ impl<'ws> Workspace<'ws> {
         let mut remaining = count.max(1);
         let mut step = 0;
         while remaining > 0 {
-            found = self.book.search(from.sheet, matcher, &from, direction, true);
+            found = self.book.search(from.sheet, matcher, &from, direction, wrapscan);
             let Ok(Some(hit)) = &found else { break };
             remaining -= 1;
             step += 1;
@@ -1478,6 +1492,14 @@ impl<'ws> Workspace<'ws> {
                     };
                     self.set_message(MessageLevel::Info, text.to_owned());
                 }
+            }
+            Ok(None) if !wrapscan => {
+                let end = match direction {
+                    Direction::Forward => "BOTTOM",
+                    Direction::Backward => "TOP",
+                };
+                let text = format!("E385: Search hit {end} without match for: {pattern}");
+                self.set_message(MessageLevel::Error, text);
             }
             Ok(None) => {
                 let text = format!("E486: Pattern not found: {pattern}");

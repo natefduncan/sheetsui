@@ -60,7 +60,10 @@ in the new direction. With no last pattern it says
 
 A search that passes the last cell goes on from the first one and says
 `search hit BOTTOM, continuing at TOP`; backward, it says
-`search hit TOP, continuing at BOTTOM`. A pattern with no match says
+`search hit TOP, continuing at BOTTOM`. With `:set nowrapscan` a search stops
+at the end of the sheet instead and says
+`E385: Search hit BOTTOM without match for: <pattern>` (or `TOP` going
+backward). See [Options](./command.md#options). A pattern with no match says
 `E486: Pattern not found` and leaves the cursor where it is. `Esc` closes the
 prompt without searching.
 

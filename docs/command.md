@@ -41,6 +41,7 @@ The currently supported commands are:
 * `quit` Quits the application. `q` is a shorthand alias for this command.
 * `system-paste` Paste from the system clipboard
 * `sort [skip <N>] [<column> [asc|desc] ...]` Sort rows. See Sorting below.
+* `set [option ...]` Change or show an option for this session. See Options below.
 * `undo` Undo the last change, the same as `u` in navigation mode.
 * `redo` Redo the last change that you undid, the same as `r` in navigation mode.
 * `nnoremap <keys> <rhs>` map keys in navigation mode. `vnoremap` does the same for range select mode. The right-hand side is keys, or `<Cmd>command<CR>`. See [Key Mappings](./keys.md).
@@ -81,6 +82,27 @@ Formulas follow the same rules as in Excel:
 You cannot sort rows that contain merged cells or array formulas.
 
 A sort undoes in one step: `u` in navigation mode, or `:undo`.
+
+## Options
+
+`set` changes options. They last until you quit and are not saved.
+
+* `set ws` turns an option on. `set nows` turns it off. `set ws!` toggles it.
+* `set ws?` shows its value on the message line, for example `nowrapscan`.
+* `set name=value` sets an option that takes a value. For such an option,
+  `set name` shows its value.
+* `set` with no option shows every option.
+
+You can give several at once: `set nows ws?`. They apply in order and stop at
+the first error. An unknown option says `E518: Unknown option: <name>`. A form
+that does not fit the option, like `set ws=1`, or a value that is not one of
+the option's values, says `E474: Invalid argument`.
+
+The options are:
+
+* `wrapscan` (`ws`), on or off, default on. A search that passes the end of
+  the sheet goes on from the other end. Off, it stops there and says `E385`.
+  See [Navigation](./navigation.md).
 
 <aside>Note that in the case of `quit` and `edit` that we do not currently
 prompt you if the current spreadsheet has not been saved yet. So your changes

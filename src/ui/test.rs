@@ -3532,3 +3532,76 @@ fn test_a_huge_count_does_not_walk_every_lap() {
         last_message(&ws)
     );
 }
+
+// ---------------------------------------------------------------------------
+// Options: :set and wrapscan
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_parse_set_command() {
+    use super::cmd::{parse, Cmd};
+    assert_eq!(parse("set"), Ok(Some(Cmd::Set(""))));
+    assert_eq!(parse("set nows ic?"), Ok(Some(Cmd::Set("nows ic?"))));
+    assert!(parse("settings").is_err());
+}
+
+#[test]
+fn test_set_shows_and_changes_wrapscan() {
+    let mut ws = search_workspace();
+    run_command(&mut ws, "set ws?");
+    assert_eq!(Some("wrapscan".to_owned()), last_message(&ws));
+    run_command(&mut ws, "set nowrapscan");
+    assert!(!ws.state.options.wrapscan());
+    run_command(&mut ws, "set");
+    assert_eq!(Some("nowrapscan".to_owned()), last_message(&ws));
+    run_command(&mut ws, "set ws!");
+    assert!(ws.state.options.wrapscan());
+}
+
+#[test]
+fn test_set_unknown_option_is_e518_on_the_message_line() {
+    let mut ws = search_workspace();
+    run_command(&mut ws, "set bogus");
+    let msg = ws.state.message.as_ref().expect("message");
+    assert_eq!("E518: Unknown option: bogus", msg.text);
+    assert_eq!(msg.level, super::MessageLevel::Error);
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_nowrapscan_stops_at_the_bottom_with_e385() {
+    let mut ws = search_workspace();
+    run_command(&mut ws, "set nows");
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    script().chars("nn").run(&mut ws).expect("run");
+    assert_eq!((3, 1), at(&ws));
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((3, 1), at(&ws));
+    assert_eq!(
+        Some("E385: Search hit BOTTOM without match for: x".to_owned()),
+        last_message(&ws)
+    );
+    // A count that runs past the end does not move at all.
+    run_command(&mut ws, "set ws");
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    run_command(&mut ws, "set nows");
+    script().chars("9n").run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(
+        Some("E385: Search hit BOTTOM without match for: x".to_owned()),
+        last_message(&ws)
+    );
+}
+
+#[test]
+fn test_nowrapscan_stops_at_the_top_going_backward() {
+    let mut ws = search_workspace();
+    run_command(&mut ws, "set nows");
+    script().char('?').chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(
+        Some("E385: Search hit TOP without match for: x".to_owned()),
+        last_message(&ws)
+    );
+}

@@ -17,6 +17,8 @@ pub enum Cmd<'a> {
     Edit(&'a str),
     Help(Option<&'a str>),
     Theme(Option<&'a str>),
+    /// `:set` and its settings, still to parse. See `options.rs`.
+    Set(&'a str),
     ExportCsv(&'a str),
     SystemPaste,
     Sort { skip: usize, keys: Vec<CmdSortKey> },
@@ -67,6 +69,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_theme(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_set(cursor.clone())? {
         return Ok(Some(cmd));
     }
     // try consume quit command.
@@ -339,6 +344,21 @@ fn try_consume_theme<'cmd, 'i: 'cmd>(
     } else {
         Some(arg)
     })))
+}
+
+fn try_consume_set<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "set";
+
+    if !compare(input.clone(), LONG) {
+        return Ok(None);
+    }
+    input.seek(LONG.len());
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err("Invalid command: Did you mean to type `set <option>`?");
+    }
+    Ok(Some(Cmd::Set(input.span(0..).trim())))
 }
 
 fn try_consume_quit<'cmd, 'i: 'cmd>(
