@@ -27,6 +27,8 @@ style header.odd    fg fg      bg comment  bold true  underline true
 style header.row    fg fg      bg line     bold true
 style cursor        fg bg      bg pink
 style selection     fg fg      bg comment
+style search        fg bg      bg yellow
+style search.current fg bg      bg orange   bold true
 
 style border        fg comment
 style title         fg purple  bold true

@@ -61,7 +61,7 @@ palette name used before it is defined, and a boolean that is not `true` or
 
 ## Slots
 
-There are 25 slots.
+There are 28 slots.
 
 Cells:
 
@@ -79,6 +79,9 @@ Grid:
 * `header.row`: row numbers and the corner cell.
 * `cursor`: the cell under the cursor.
 * `selection`: the cells of a visual selection.
+* `search`: cells that match the last search, while `hlsearch` is on.
+* `search.current`: the match under the cursor. It is applied on top of
+  `search`.
 
 Frame:
 
@@ -119,7 +122,9 @@ For each cell, sheetui builds the style in this order:
    contrasts with the fill, and the type slot's foreground does not apply.
 4. In a visual selection, `selection` is applied, then `cursor` on the cursor
    cell.
-5. Bold and italic from the file are applied last.
+5. A cell that matches the last search gets `search`, and then, if the cursor
+   is on it, `search.current`.
+6. Bold and italic from the file are applied last.
 
 ## Example
 

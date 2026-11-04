@@ -19,6 +19,8 @@ pub enum Cmd<'a> {
     Theme(Option<&'a str>),
     /// `:set` and its settings, still to parse. See `options.rs`.
     Set(&'a str),
+    /// `:noh`: hide the search highlight until the next search.
+    NoHighlight,
     ExportCsv(&'a str),
     SystemPaste,
     Sort { skip: usize, keys: Vec<CmdSortKey> },
@@ -72,6 +74,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_set(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_nohlsearch(cursor.clone())? {
         return Ok(Some(cmd));
     }
     // try consume quit command.
@@ -359,6 +364,24 @@ fn try_consume_set<'cmd, 'i: 'cmd>(
         return Err("Invalid command: Did you mean to type `set <option>`?");
     }
     Ok(Some(Cmd::Set(input.span(0..).trim())))
+}
+
+/// `:noh`, or any longer start of `:nohlsearch`, as in vim.
+fn try_consume_nohlsearch<'cmd, 'i: 'cmd>(
+    input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const SHORT: &str = "noh";
+    const LONG: &str = "nohlsearch";
+
+    if !compare(input.clone(), SHORT) {
+        return Ok(None);
+    }
+    let text = input.span(0..).trim_end();
+    if text.len() <= LONG.len() && LONG.starts_with(text) {
+        Ok(Some(Cmd::NoHighlight))
+    } else {
+        Err("Invalid command: nohlsearch does not take an argument")
+    }
 }
 
 fn try_consume_quit<'cmd, 'i: 'cmd>(

@@ -1233,3 +1233,61 @@ fn test_search_backward_from_beyond_the_used_range() {
     // From before the first cell, backward wraps to the last.
     assert_eq!(Some(((2, 2), true)), find(&book, "d", (1, 1), Direction::Backward, true));
 }
+
+/// The cells of rows `rows` and columns `cols` that match `pattern`, sorted.
+fn matches_in(book: &Book, within: SearchIn, pattern: &str, rows: (usize, usize), cols: (usize, usize)) -> Vec<(usize, usize)> {
+    let mut found: Vec<_> = book
+        .matches_in(0, &re(pattern), within, rows.0..=rows.1, cols.0..=cols.1)
+        .expect("matches")
+        .into_iter()
+        .collect();
+    found.sort_unstable();
+    found
+}
+
+#[test]
+fn test_matches_in_a_rectangle() {
+    let book = csv_book("x,y,x\nz,x,z\nx,y,y\n");
+    let value = SearchIn::Value;
+    assert_eq!(
+        vec![(1, 1), (1, 3), (2, 2), (3, 1)],
+        matches_in(&book, value, "x", (1, 3), (1, 3))
+    );
+    // Only cells inside the rectangle count.
+    assert_eq!(vec![(1, 3), (2, 2)], matches_in(&book, value, "x", (1, 2), (2, 3)));
+    // Empty cells and cells beyond the used range never match.
+    assert_eq!(Vec::<(usize, usize)>::new(), matches_in(&book, value, "^$", (1, 9), (1, 9)));
+    assert_eq!(Vec::<(usize, usize)>::new(), matches_in(&book, value, "q", (1, 3), (1, 3)));
+}
+
+#[test]
+fn test_matches_in_follows_searchin() {
+    let mut book = csv_book("1,2\n");
+    book.update_cell(&phase2_addr(1, 3), "=A1+B1").expect("set");
+    book.evaluate();
+    assert_eq!(vec![(1, 3)], matches_in(&book, SearchIn::Value, "^3$", (1, 1), (1, 3)));
+    assert_eq!(vec![(1, 3)], matches_in(&book, SearchIn::Raw, "A1", (1, 1), (1, 3)));
+    assert_eq!(Vec::<(usize, usize)>::new(), matches_in(&book, SearchIn::Value, "A1", (1, 1), (1, 3)));
+}
+
+#[test]
+fn test_matches_in_skips_hidden_merged_and_spilled_cells() {
+    let mut model =
+        Model::new_empty("test", "en", "America/New_York", "en").expect("model");
+    model.workbook.worksheets[0].merge_cells.push("A1:B2".to_string());
+    let mut book = Book::from_model(model);
+    for (row, col) in [(1, 1), (1, 2), (2, 1), (2, 2), (3, 1)] {
+        book.update_cell(&phase2_addr(row, col), "1").expect("set");
+    }
+    book.update_cell(&phase2_addr(1, 3), "=SORT(A1:A3)").expect("set");
+    book.evaluate();
+    // C1 shows 1 too, but C2 and C3 are spilled from it.
+    assert_eq!(
+        vec![(1, 1), (3, 1)],
+        matches_in(&book, SearchIn::Value, "^1$", (1, 3), (1, 2))
+    );
+    assert_eq!(
+        vec![(1, 3)],
+        matches_in(&book, SearchIn::Raw, "SORT", (1, 3), (3, 3))
+    );
+}

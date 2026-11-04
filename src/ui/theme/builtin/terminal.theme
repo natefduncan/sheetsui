@@ -4,5 +4,7 @@ style header.even  fg terminal  bg terminal  bold true  underline true
 style header.odd   fg terminal  bg terminal  bold true  underline true  dim true
 style cursor       fg terminal  bg terminal  reverse true  bold true
 style selection    fg terminal  bg terminal  reverse true
+style search       fg terminal  bg terminal  underline true  bold true
+style search.current  fg terminal  bg terminal  reverse true  underline true  bold true
 style dialog       fg terminal  bg terminal
 style heading      fg terminal

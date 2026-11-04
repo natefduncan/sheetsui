@@ -115,5 +115,20 @@ pub fn cell_style(
     style
 }
 
+/// Patches the search highlight onto a cell's style. A cell that matches
+/// the last search gets `search`; the one under the cursor also gets
+/// `search.current`. A cell that does not match is left alone.
+pub fn search_style(style: Style, theme: &Theme, is_match: bool, is_cursor: bool) -> Style {
+    if !is_match {
+        return style;
+    }
+    let style = style.patch(theme.get(Slot::Search));
+    if is_cursor {
+        style.patch(theme.get(Slot::SearchCurrent))
+    } else {
+        style
+    }
+}
+
 #[cfg(test)]
 mod test;

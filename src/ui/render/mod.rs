@@ -59,6 +59,7 @@ impl<'ws> Workspace<'ws> {
                 hint.render(info_rect, buf);
             }),
             Box::new(move |rect: Rect, buf: &mut Buffer, ws: &mut Self| {
+                let search = ws.highlight_matcher();
                 let sheet_name = ws.book.get_sheet_name().unwrap_or("Unknown");
                 let theme = &ws.state.theme;
                 let table_block = Block::bordered()
@@ -74,6 +75,7 @@ impl<'ws> Workspace<'ws> {
                     &ws.state.theme,
                 )
                 .with_selected(ws.book.location.clone())
+                .with_search(search.as_ref().map(|(matcher, within)| (matcher, *within)))
                 .block(table_block);
                 StatefulWidget::render(viewport, rect, buf, &mut ws.state.viewport_state);
             }),

@@ -138,3 +138,29 @@ fn palette_themes_set_every_slot() {
         }
     }
 }
+
+#[test]
+fn every_builtin_sets_the_search_slots() {
+    for (name, text) in BUILTIN {
+        // Parsed alone, so a value inherited from `default` does not count.
+        let (theme, _) = parse(text, &Theme::blank(name));
+        let search = theme.get(Slot::Search);
+        let current = theme.get(Slot::SearchCurrent);
+        assert_ne!(ratatui::style::Style::default(), search, "{name}");
+        assert_ne!(search, current, "{name}");
+        assert_ne!(theme.get(Slot::Cursor), current, "{name}");
+        assert_ne!(theme.get(Slot::Selection), search, "{name}");
+    }
+}
+
+#[test]
+fn a_user_theme_without_the_search_slots_falls_back_to_default() {
+    let dir = temp_dir("search-fallback");
+    write(&dir, "plain.theme", "style cell fg red\n");
+    let (theme, warnings) = load("plain", Some(&dir)).unwrap();
+    assert_eq!(warnings, vec![]);
+    let default = Theme::default();
+    assert_eq!(default.get(Slot::Search), theme.get(Slot::Search));
+    assert_eq!(default.get(Slot::SearchCurrent), theme.get(Slot::SearchCurrent));
+    let _ = std::fs::remove_dir_all(&dir);
+}

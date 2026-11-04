@@ -89,6 +89,13 @@ A date shows the date in both. `:set searchin=value` goes back. Changing it
 after a search changes what `n` and `N` find. See
 [Options](./command.md#options).
 
+While a search is in effect, every visible cell that matches it is drawn
+highlighted, and the match under the cursor in a second color. The whole cell
+is highlighted, not just the matching text. `:noh` hides the highlight until
+the next search, or `n` or `N`. `:set nohlsearch` turns highlighting off. The
+colors are the theme's `search` and `search.current` slots; see
+[Themes](./themes.md).
+
 A merged cell is searched once, as its top-left cell. An array formula is
 searched once, as the cell that holds the formula.
 

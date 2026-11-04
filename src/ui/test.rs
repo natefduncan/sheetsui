@@ -3554,7 +3554,7 @@ fn test_set_shows_and_changes_wrapscan() {
     assert!(!ws.state.options.wrapscan());
     run_command(&mut ws, "set");
     assert_eq!(
-        Some("nowrapscan  noignorecase  nosmartcase  searchin=value".to_owned()),
+        Some("nowrapscan  noignorecase  nosmartcase  searchin=value  hlsearch".to_owned()),
         last_message(&ws)
     );
     run_command(&mut ws, "set ws!");
@@ -3737,4 +3737,88 @@ fn test_set_searchin_bad_value_is_an_error() {
     assert_eq!(book::search::SearchIn::Value, ws.state.options.searchin());
     run_command(&mut ws, "set searchin?");
     assert_eq!(Some("searchin=value".to_owned()), last_message(&ws));
+}
+
+// ---------------------------------------------------------------------------
+// Search: hlsearch and :noh
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_parse_nohlsearch() {
+    use super::cmd::{parse, Cmd};
+    for text in ["noh", "nohl", "nohls", "nohlsearch", "noh "] {
+        assert_eq!(parse(text), Ok(Some(Cmd::NoHighlight)), "{text}");
+    }
+    assert!(parse("noh x").is_err());
+    assert!(parse("nohlsearchx").is_err());
+    assert!(parse("nohx").is_err());
+}
+
+/// The pattern being highlighted, if any.
+fn highlighted(ws: &mut Workspace) -> Option<String> {
+    ws.highlight_matcher().map(|(re, _)| re.as_str().to_owned())
+}
+
+#[test]
+fn test_hlsearch_highlights_after_a_search() {
+    let mut ws = search_workspace();
+    assert!(ws.state.options.hlsearch());
+    assert_eq!(None, highlighted(&mut ws));
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!(Some("x".to_owned()), highlighted(&mut ws));
+    // A miss still highlights, as in vim; there is just nothing to see.
+    script().char('/').chars("nope").enter().run(&mut ws).expect("run");
+    assert_eq!(Some("nope".to_owned()), highlighted(&mut ws));
+    // An invalid pattern keeps the last one.
+    script().char('/').chars("(").enter().run(&mut ws).expect("run");
+    assert_eq!(Some("nope".to_owned()), highlighted(&mut ws));
+}
+
+#[test]
+fn test_noh_clears_the_highlight_until_the_next_search() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    run_command(&mut ws, "noh");
+    assert_eq!(None, highlighted(&mut ws));
+    assert_eq!(None, last_message(&ws));
+    // `:noh` keeps the pattern: `n` still searches, and highlights again.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    assert_eq!(Some("x".to_owned()), highlighted(&mut ws));
+    run_command(&mut ws, "nohlsearch");
+    assert_eq!(None, highlighted(&mut ws));
+    script().char('/').chars("y").enter().run(&mut ws).expect("run");
+    assert_eq!(Some("y".to_owned()), highlighted(&mut ws));
+    // `:noh` with no search is not an error.
+    let mut fresh = search_workspace();
+    run_command(&mut fresh, "noh");
+    assert_eq!(None, last_message(&fresh));
+}
+
+#[test]
+fn test_set_nohlsearch_turns_highlighting_off() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    run_command(&mut ws, "set nohls");
+    assert!(!ws.state.options.hlsearch());
+    assert_eq!(None, highlighted(&mut ws));
+    // Searching does not turn it on.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!(None, highlighted(&mut ws));
+    run_command(&mut ws, "set hlsearch");
+    assert_eq!(Some("x".to_owned()), highlighted(&mut ws));
+}
+
+#[test]
+fn test_setting_hlsearch_undoes_noh() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    run_command(&mut ws, "noh");
+    // As in vim, `:set hls` shows the highlight again even if it was on.
+    run_command(&mut ws, "set hls");
+    assert_eq!(Some("x".to_owned()), highlighted(&mut ws));
+    // Other `:set` commands do not.
+    run_command(&mut ws, "noh");
+    run_command(&mut ws, "set ic");
+    assert_eq!(None, highlighted(&mut ws));
 }

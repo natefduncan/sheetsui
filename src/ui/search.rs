@@ -33,6 +33,9 @@ pub struct SearchState {
     /// It becomes the search's direction on Enter, not before, so `Esc`
     /// leaves `n` going the way it went.
     pub prompt: Direction,
+    /// Whether the last search's matches are drawn highlighted. A search
+    /// turns it on and `:noh` off; the `hlsearch` option can still hide it.
+    pub highlight: bool,
 }
 
 #[derive(Debug)]

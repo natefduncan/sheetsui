@@ -154,3 +154,42 @@ fn overlays_apply_on_top() {
     let s = cell_style(&t, None, Some(Color::Rgb(0, 0, 0)), Slot::Cell, true, false);
     assert_eq!(Some(Color::LightBlue), s.bg);
 }
+
+fn search_theme() -> Theme {
+    let (theme, warnings) = parse(
+        "style search fg black bg yellow\nstyle search.current bg #FF8000 bold true\n",
+        &typed_theme(),
+    );
+    assert_eq!(warnings, vec![]);
+    theme
+}
+
+#[test]
+fn a_cell_that_does_not_match_keeps_its_style() {
+    let t = search_theme();
+    let base = cell_style(&t, None, Some(Color::Blue), Slot::CellNumber, true, true);
+    assert_eq!(base, search_style(base, &t, false, false));
+    assert_eq!(base, search_style(base, &t, false, true));
+}
+
+#[test]
+fn a_match_draws_with_the_search_slot_over_fill_and_selection() {
+    let t = search_theme();
+    let base = cell_style(&t, None, Some(Color::Blue), Slot::CellNumber, true, false);
+    let s = search_style(base, &t, true, false);
+    assert_eq!(Some(Color::Yellow), s.bg);
+    assert_eq!(Some(Color::Black), s.fg);
+}
+
+#[test]
+fn the_match_under_the_cursor_draws_with_search_current() {
+    let t = search_theme();
+    let base = cell_style(&t, None, None, Slot::CellString, false, true);
+    let s = search_style(base, &t, true, true);
+    assert_eq!(Some(Color::Rgb(255, 128, 0)), s.bg);
+    // search.current patches search, so the unset foreground comes from it.
+    assert_eq!(Some(Color::Black), s.fg);
+    assert!(s.add_modifier.contains(Modifier::BOLD));
+    // The cursor's own modifiers stay under it.
+    assert!(s.add_modifier.contains(Modifier::REVERSED));
+}

@@ -58,6 +58,8 @@ slots! {
     HeaderRow => "header.row",
     Cursor => "cursor",
     Selection => "selection",
+    Search => "search",
+    SearchCurrent => "search.current",
     Border => "border",
     Title => "title",
     Tab => "tab",

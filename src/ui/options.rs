@@ -45,6 +45,11 @@ pub const OPTIONS: &[Spec] = &[
         short: None,
         kind: Kind::Choice(&["value", "raw"]),
     },
+    Spec {
+        name: "hlsearch",
+        short: Some("hls"),
+        kind: Kind::Bool(true),
+    },
 ];
 
 /// The current value of an option.
@@ -98,6 +103,11 @@ impl Options {
     /// case.
     pub fn smartcase(&self) -> bool {
         self.flag("smartcase")
+    }
+
+    /// Whether the cells that match the last search are highlighted.
+    pub fn hlsearch(&self) -> bool {
+        self.flag("hlsearch")
     }
 
     /// Which text of a cell a search matches.

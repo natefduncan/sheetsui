@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use anyhow::Result;
+use regex::Regex;
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Flex, Rect},
@@ -8,11 +11,11 @@ use ratatui::{
 };
 
 use super::{
-    cell_class::{cell_style, classify},
+    cell_class::{cell_style, classify, search_style},
     Address, Book, RangeSelection,
 };
 use crate::{
-    book,
+    book::{self, search::SearchIn},
     ui::theme::{color::parse_workbook_color, Slot, Theme},
 };
 
@@ -41,6 +44,8 @@ pub struct Viewport<'ws> {
     range_selection: Option<&'ws RangeSelection>,
     block: Option<Block<'ws>>,
     theme: &'ws Theme,
+    /// The search to highlight, if `hlsearch` is on and there is one.
+    search: Option<(&'ws Regex, SearchIn)>,
 }
 
 pub(crate) const COLNAMES: [&str; 26] = [
@@ -60,7 +65,15 @@ impl<'ws> Viewport<'ws> {
             range_selection: app_state,
             selected: Default::default(),
             block: None,
+            search: None,
         }
+    }
+
+    /// Highlights the cells that `matcher` matches, reading what `within`
+    /// says.
+    pub fn with_search(mut self, search: Option<(&'ws Regex, SearchIn)>) -> Self {
+        self.search = search;
+        self
     }
 
     pub fn with_selected(mut self, location: Address) -> Self {
@@ -153,6 +166,7 @@ impl<'ws> Viewport<'ws> {
         if let Some(vr) = visible_rows.first() {
             state.prev_corner.row = *vr;
         }
+        let matches = self.visible_matches(&visible_rows, &visible_columns);
         let rows: Vec<Row> =
             visible_rows
                 .into_iter()
@@ -169,7 +183,8 @@ impl<'ws> Viewport<'ws> {
                                     sheet: self.book.location.sheet,
                                 })
                                 .unwrap();
-                            self.compute_cell_style(ri, *ci, Cell::new(Text::raw(content)))
+                            let is_match = matches.contains(&(ri, *ci));
+                            self.compute_cell_style(ri, *ci, is_match, Cell::new(Text::raw(content)))
                         },
                     ));
                     Row::new(cells)
@@ -200,10 +215,27 @@ impl<'ws> Viewport<'ws> {
             .flex(Flex::Start))
     }
 
+    /// The visible cells that match the search, row and column. Only the
+    /// visible rectangle is checked, never the whole sheet.
+    fn visible_matches(&self, rows: &[usize], cols: &[VisibleColumn]) -> HashSet<(usize, usize)> {
+        let Some((matcher, within)) = self.search else {
+            return HashSet::new();
+        };
+        let (Some(&top), Some(&bottom), Some(left), Some(right)) =
+            (rows.first(), rows.last(), cols.first(), cols.last())
+        else {
+            return HashSet::new();
+        };
+        self.book
+            .matches_in(self.book.location.sheet, matcher, within, top..=bottom, left.idx..=right.idx)
+            .unwrap_or_default()
+    }
+
     fn compute_cell_style<'widget>(
         &self,
         ri: usize,
         ci: usize,
+        is_match: bool,
         mut cell: Cell<'widget>,
     ) -> Cell<'widget> {
         // TODO(zaphar): Should probably create somekind of formatter abstraction.
@@ -212,7 +244,7 @@ impl<'ws> Viewport<'ws> {
             row: ri,
             col: ci,
         }) {
-            cell = self.compute_cell_colors(&style, ri, ci, cell);
+            cell = self.compute_cell_colors(&style, ri, ci, is_match, cell);
             cell = if style.font.b { cell.bold() } else { cell };
             cell = if style.font.i { cell.italic() } else { cell };
         }
@@ -224,6 +256,7 @@ impl<'ws> Viewport<'ws> {
         style: &ironcalc::base::types::Style,
         ri: usize,
         ci: usize,
+        is_match: bool,
         cell: Cell<'widget>,
     ) -> Cell<'widget> {
         let workbook_theme = &self.book.model.get_model().workbook.theme;
@@ -255,7 +288,7 @@ impl<'ws> Viewport<'ws> {
             in_selection,
             is_cursor,
         );
-        cell.style(style)
+        cell.style(search_style(style, self.theme, is_match, is_cursor))
     }
 }
 

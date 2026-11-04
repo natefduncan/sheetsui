@@ -42,6 +42,7 @@ The currently supported commands are:
 * `system-paste` Paste from the system clipboard
 * `sort [skip <N>] [<column> [asc|desc] ...]` Sort rows. See Sorting below.
 * `set [option ...]` Change or show an option for this session. See Options below.
+* `nohlsearch` Stop highlighting the matches of the last search until the next search. `noh` is a shorthand alias for this command.
 * `undo` Undo the last change, the same as `u` in navigation mode.
 * `redo` Redo the last change that you undid, the same as `r` in navigation mode.
 * `nnoremap <keys> <rhs>` map keys in navigation mode. `vnoremap` does the same for range select mode. The right-hand side is keys, or `<Cmd>command<CR>`. See [Key Mappings](./keys.md).
@@ -112,6 +113,9 @@ The options are:
   `value` is what the sheet shows, like `$12.00` or a formula's result; `raw`
   is what you edit, like `12` or `=A1*2`. Use `set searchin=raw` to search
   formulas.
+* `hlsearch` (`hls`), on or off, default on. The cells that match the last
+  search are highlighted. `nohlsearch` hides the highlight until the next
+  search; `set hls` shows it again.
 
 `\c` and `\C` in a pattern beat `ignorecase` and `smartcase`. See
 [Navigation](./navigation.md#search).

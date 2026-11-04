@@ -14,7 +14,7 @@ fn style_of(text: &str, slot: Slot) -> Style {
 
 #[test]
 fn slot_names_round_trip() {
-    assert_eq!(25 + 1, Slot::COUNT);
+    assert_eq!(28, Slot::COUNT);
     for slot in Slot::ALL {
         assert_eq!(Some(*slot), Slot::from_name(&slot.to_string()));
     }

@@ -4,6 +4,8 @@ style header.even  fg black    bg #D0D4DC  bold true  underline true
 style header.odd   fg black    bg #B4B9C4  bold true  underline true
 style cursor       fg black    bg #FFE08A
 style selection    fg black    bg #A8D0F0
+style search       fg black    bg #C8E6A0
+style search.current  fg black  bg #F4A259  bold true
 style dialog       fg black    bg #EEEEEE
 style heading      fg blue
 style cell.number   fg #0B5394

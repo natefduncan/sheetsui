@@ -409,3 +409,73 @@ fn test_draw_shows_pending_keys_in_the_bottom_title() {
         .expect("handle key");
     assert!(!bottom_row(&mut ws).contains(" g "));
 }
+
+/// Draws a workspace on `x,y,x / z,x,z` after `commands` and returns the
+/// background of each cell in rows 1-2, columns 1-3. A command that starts
+/// with `/` or `:` is ended with Enter; any other is typed as keys.
+fn search_backgrounds(commands: &[&str]) -> Vec<Vec<Color>> {
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::{backend::TestBackend, Terminal};
+
+    let book = Book::from_csv_reader("x,y,x\nz,x,z\n".as_bytes(), None).expect("csv");
+    let mut ws = crate::ui::Workspace::new(book, std::path::PathBuf::from("s.sui"));
+    let width = ws.book.get_col_size(1).expect("col size") as u16;
+    for command in commands {
+        let mut keys: Vec<KeyCode> = command.chars().map(KeyCode::Char).collect();
+        if command.starts_with(['/', ':']) {
+            keys.push(KeyCode::Enter);
+        }
+        for key in keys {
+            ws.handle_input(Event::Key(KeyEvent::new(key, KeyModifiers::empty())))
+                .expect("handle key");
+        }
+    }
+    let mut term = Terminal::new(TestBackend::new(80, 20)).expect("terminal");
+    term.draw(|f| super::draw(f, &mut ws)).expect("draw");
+    let buf = term.backend().buffer().clone();
+    // Row 1 starts after the sheet's border and the 5-wide row label.
+    let (x, y) = find_text(&buf, "│1");
+    let x0 = x + 1 + 5;
+    (0..2)
+        .map(|row| {
+            (0..3)
+                .map(|col| buf[(x0 + width * col, y + row)].bg)
+                .collect()
+        })
+        .collect()
+}
+
+#[test]
+fn test_hlsearch_draws_matches_with_the_search_slots() {
+    use crate::ui::theme::{Slot, Theme};
+    let theme = Theme::default();
+    let bg = |slot| theme.get(slot).bg.expect("bg");
+    let (search, current, cell, cursor) =
+        (bg(Slot::Search), bg(Slot::SearchCurrent), bg(Slot::Cell), bg(Slot::Cursor));
+
+    // Before a search nothing is highlighted.
+    assert_eq!(
+        vec![vec![cursor, cell, cell], vec![cell, cell, cell]],
+        search_backgrounds(&[])
+    );
+    // `/x` moves to C1, which is the current match.
+    assert_eq!(
+        vec![vec![search, cell, current], vec![cell, search, cell]],
+        search_backgrounds(&["/x"])
+    );
+    // `:noh` hides it; the cursor stays on C1.
+    assert_eq!(
+        vec![vec![cell, cell, cursor], vec![cell, cell, cell]],
+        search_backgrounds(&["/x", ":noh"])
+    );
+    // So does `nohlsearch`.
+    assert_eq!(
+        vec![vec![cell, cell, cursor], vec![cell, cell, cell]],
+        search_backgrounds(&["/x", ":set nohls"])
+    );
+    // The cursor on a cell that does not match keeps the cursor style.
+    assert_eq!(
+        vec![vec![search, cursor, search], vec![cell, search, cell]],
+        search_backgrounds(&["/x", "h"])
+    );
+}

@@ -726,6 +726,18 @@ impl<'ws> Workspace<'ws> {
                     Ok(None) => {}
                     Err(text) => self.set_message(MessageLevel::Error, text),
                 }
+                // As in vim, setting `hlsearch` shows the highlight that
+                // `:noh` hid, even if the option was already on.
+                let sets_hls = args
+                    .split_whitespace()
+                    .any(|a| matches!(a.trim_end_matches('!'), "hls" | "hlsearch"));
+                if sets_hls && self.state.options.hlsearch() {
+                    self.state.search.highlight = true;
+                }
+                Ok(None)
+            }
+            Ok(Some(Cmd::NoHighlight)) => {
+                self.state.search.highlight = false;
                 Ok(None)
             }
             Ok(Some(Cmd::Write(maybe_path))) => {
@@ -1452,6 +1464,8 @@ impl<'ws> Workspace<'ws> {
     /// `direction`. A miss or a wrap is reported on the message line; a miss
     /// leaves the cursor where it was.
     fn search_next(&mut self, direction: Direction, count: usize) {
+        // Every search, `n` included, shows the highlight `:noh` hid.
+        self.state.search.highlight = true;
         let case = self.case_options();
         let (pattern, matcher) = match self.state.search.last(case) {
             Some(Ok(last)) => last,
@@ -1519,6 +1533,17 @@ impl<'ws> Workspace<'ws> {
             }
             Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
         }
+    }
+
+    /// The search to highlight and the text it matches: `None` when
+    /// `hlsearch` is off, after `:noh`, or before any search.
+    pub(crate) fn highlight_matcher(&mut self) -> Option<(regex::Regex, book::search::SearchIn)> {
+        if !self.state.options.hlsearch() || !self.state.search.highlight {
+            return None;
+        }
+        let case = self.case_options();
+        let (_, matcher) = self.state.search.last(case)?.ok()?;
+        Some((matcher.clone(), self.state.options.searchin()))
     }
 
     /// The case options a pattern is compiled with.
