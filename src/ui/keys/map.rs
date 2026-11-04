@@ -1,6 +1,11 @@
 //! User key mappings, and how typed keys resolve against them and the
 //! built-in table. See `planning/keys-design.md`, "Lookup".
-use std::time::{Duration, Instant};
+use std::{
+    path::PathBuf,
+    time::{Duration, Instant},
+};
+
+use crate::ui::theme::parse::Warning;
 
 use super::{
     builtin::{self, Lookup, Table},
@@ -210,6 +215,8 @@ pub enum MapCommand {
         mode: MapMode,
         lhs: Vec<Key>,
     },
+    /// `nmap` or `vmap` with no arguments: show the mappings.
+    List(MapMode),
 }
 
 /// The user mappings, and the state of a key sequence being typed.
@@ -225,6 +232,10 @@ pub struct KeyMap {
     /// True while a mapping's keys are being replayed. User mappings do not
     /// apply then: the keys mean what the built-ins say.
     pub replaying: bool,
+    /// Problems found loading the keys file.
+    pub warnings: Vec<Warning>,
+    /// The keys file that was read, or tried.
+    pub loaded_from: Option<PathBuf>,
 }
 
 impl KeyMap {
@@ -272,6 +283,9 @@ impl KeyMap {
                 self.table_mut(mode).insert(lhs, Target::Replay(rhs));
                 Ok(())
             }
+            MapCommand::List(_) => {
+                Err("nmap and vmap list mappings and do nothing in a keys file".to_owned())
+            }
             MapCommand::Unmap { mode, lhs } => {
                 let existing = self
                     .table(mode)
@@ -294,4 +308,41 @@ impl KeyMap {
             }
         }
     }
+}
+
+/// The text of the `:nmap` and `:vmap` dialog, as markdown: the user's
+/// mappings in a mode, then any warnings from loading the keys file.
+pub fn listing_text(mode: MapMode, keymap: &KeyMap) -> String {
+    let (title, add) = match mode {
+        MapMode::Navigate => ("Navigation mappings", "nnoremap"),
+        MapMode::RangeSelect => ("Range-select mappings", "vnoremap"),
+    };
+    let mut text = format!("# {title}\n\n");
+    let table = keymap.table(mode);
+    if table.is_empty() {
+        text.push_str(&format!(
+            "No mappings. Add one with `{add} <keys> <rhs>`, or put it in the keys file.\n"
+        ));
+    }
+    for mapping in table.mappings() {
+        let rhs = match &mapping.target {
+            Target::Replay(items) => format!("`{}`", format_rhs(items)),
+            Target::Unmapped => "(unmapped)".to_owned(),
+        };
+        text.push_str(&format!("* `{}` \u{2192} {rhs}\n", format_keys(&mapping.lhs)));
+    }
+    if let Some(path) = &keymap.loaded_from {
+        text.push_str(&format!("\nKeys file: {}\n", path.display()));
+    }
+    if !keymap.warnings.is_empty() {
+        text.push_str("\n## Warnings\n\n");
+        for w in &keymap.warnings {
+            if w.line == 0 {
+                text.push_str(&format!("* {}\n", w.msg));
+            } else {
+                text.push_str(&format!("* line {}: {}\n", w.line, w.msg));
+            }
+        }
+    }
+    text
 }

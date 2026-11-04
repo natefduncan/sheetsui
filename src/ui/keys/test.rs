@@ -2,8 +2,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use super::{
     builtin::{self, Lookup, NavHandler, RangeHandler},
-    command,
+    command, file,
     map::{
+        listing_text,
         format_rhs, parse_rhs, resolve, resolve_timeout, KeyMap, MapCommand, MapMode, Resolution,
         RhsItem, Target, UserLookup, UserTable,
     },
@@ -614,7 +615,7 @@ fn the_four_commands_parse() {
 
 #[test]
 fn other_commands_are_not_mapping_commands() {
-    for text in ["write foo", "quit", "new-sheet x", "nnoremapx a b", "noremap a b", "nmap", ""] {
+    for text in ["write foo", "quit", "new-sheet x", "nnoremapx a b", "noremap a b", "nmapx", ""] {
         assert_eq!(Ok(None), command::parse(text), "{text:?}");
     }
 }
@@ -713,4 +714,184 @@ fn apply_unmap_of_nothing_is_an_error() {
     // The start of a built-in sequence is not a built-in key.
     assert!(map.apply(parsed("nunmap g")).is_err());
     assert!(map.nav.is_empty());
+}
+
+#[test]
+fn nmap_and_vmap_list() {
+    assert_eq!(MapCommand::List(MapMode::Navigate), parsed("nmap"));
+    assert_eq!(MapCommand::List(MapMode::RangeSelect), parsed("vmap"));
+    assert_eq!(MapCommand::List(MapMode::Navigate), parsed("  nmap  "));
+    assert!(command_error("nmap x").contains("nnoremap"));
+    assert!(command_error("vmap x y").contains("vnoremap"));
+}
+
+fn load(text: &str) -> (KeyMap, Vec<(usize, String)>) {
+    let mut map = KeyMap::default();
+    let warnings = file::load(text, &mut map)
+        .into_iter()
+        .map(|w| (w.line, w.msg))
+        .collect();
+    (map, warnings)
+}
+
+#[test]
+fn a_keys_file_runs_each_command() {
+    let (map, warnings) = load(
+        "nnoremap <Space>c yj\nnnoremap k j\nvnoremap <Space>s <Cmd>sort<CR>\nnunmap q\nvunmap h\n",
+    );
+    assert_eq!(Vec::<(usize, String)>::new(), warnings);
+    assert_eq!(3, map.nav.mappings().len());
+    assert_eq!(2, map.range.mappings().len());
+    assert_eq!(Target::Unmapped, map.nav.mappings()[2].target);
+    assert_eq!(Target::Unmapped, map.range.mappings()[1].target);
+}
+
+#[test]
+fn comments_blanks_and_a_leading_colon_are_fine() {
+    let (map, warnings) = load(
+        "# my keys\n\n   \n  # indented comment\n:nnoremap a j\n  : nnoremap b k  \n\tnnoremap c l\n",
+    );
+    assert_eq!(Vec::<(usize, String)>::new(), warnings);
+    assert_eq!(3, map.nav.mappings().len());
+}
+
+#[test]
+fn windows_line_endings_are_fine() {
+    let (map, warnings) = load("nnoremap a j\r\nnnoremap b k\r\n");
+    assert_eq!(Vec::<(usize, String)>::new(), warnings);
+    assert_eq!(2, map.nav.mappings().len());
+    assert_eq!(replay("j"), map.nav.mappings()[0].target);
+}
+
+#[test]
+fn a_bad_line_is_skipped_with_its_line_number_and_the_rest_still_load() {
+    let (map, warnings) = load(
+        "nnoremap a j\n# comment\n\nnnoremap <Nope> j\nwrite foo\nnnoremap 5 j\nnnoremap <Esc> j\nnunmap zz\nnmap\nnnoremap b k\n",
+    );
+    let lines: Vec<usize> = warnings.iter().map(|(line, _)| *line).collect();
+    assert_eq!(vec![4, 5, 6, 7, 8, 9], lines);
+    assert!(warnings[0].1.contains("not a key name"), "{warnings:?}");
+    assert!(warnings[1].1.contains("only nnoremap"), "{warnings:?}");
+    assert!(warnings[2].1.contains("numeric prefix"), "{warnings:?}");
+    assert!(warnings[3].1.contains("<Esc>"), "{warnings:?}");
+    assert!(warnings[4].1.contains("No mapping for zz"), "{warnings:?}");
+    assert!(warnings[5].1.contains("do nothing in a keys file"), "{warnings:?}");
+    assert_eq!(2, map.nav.mappings().len(), "lines 1 and 10 loaded");
+}
+
+#[test]
+fn a_command_in_a_mapping_is_not_checked_until_it_runs() {
+    let (map, warnings) = load("nnoremap a <Cmd>no-such-command<CR>\n");
+    assert_eq!(Vec::<(usize, String)>::new(), warnings);
+    assert_eq!(1, map.nav.mappings().len());
+}
+
+#[test]
+fn a_later_line_replaces_an_earlier_one() {
+    let (map, _) = load("nnoremap a j\nnnoremap a k\n");
+    assert_eq!(1, map.nav.mappings().len());
+    assert_eq!(replay("k"), map.nav.mappings()[0].target);
+}
+
+fn keys_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("sheetui-keys-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+}
+
+#[test]
+fn load_file_reads_keys_from_the_config_dir() {
+    let dir = keys_dir("dir");
+    std::fs::write(dir.join("keys"), "nnoremap a j\n").unwrap();
+    let mut map = KeyMap::default();
+    let loaded = file::load_file(None, Some(&dir), &mut map);
+    assert_eq!(Some(dir.join("keys")), loaded.path);
+    assert!(loaded.warnings.is_empty());
+    assert_eq!(1, map.nav.mappings().len());
+}
+
+#[test]
+fn a_missing_file_in_the_config_dir_says_nothing() {
+    let dir = keys_dir("missing");
+    let mut map = KeyMap::default();
+    let loaded = file::load_file(None, Some(&dir), &mut map);
+    assert_eq!(file::Loaded::default(), loaded);
+    assert!(map.nav.is_empty());
+}
+
+#[test]
+fn no_config_dir_and_no_flag_loads_nothing() {
+    let mut map = KeyMap::default();
+    assert_eq!(file::Loaded::default(), file::load_file(None, None, &mut map));
+}
+
+#[test]
+fn the_flag_beats_the_config_dir() {
+    let dir = keys_dir("flag");
+    std::fs::write(dir.join("keys"), "nnoremap a j\n").unwrap();
+    let other = dir.join("other");
+    std::fs::write(&other, "nnoremap b k\nnnoremap c l\n").unwrap();
+    let mut map = KeyMap::default();
+    let loaded = file::load_file(Some(&other), Some(&dir), &mut map);
+    assert_eq!(Some(other), loaded.path);
+    assert_eq!(2, map.nav.mappings().len());
+}
+
+#[test]
+fn a_missing_file_named_by_the_flag_is_a_warning() {
+    let dir = keys_dir("noflagfile");
+    let missing = dir.join("nope");
+    let mut map = KeyMap::default();
+    let loaded = file::load_file(Some(&missing), Some(&dir), &mut map);
+    assert_eq!(1, loaded.warnings.len());
+    assert_eq!(0, loaded.warnings[0].line);
+    assert!(loaded.warnings[0].msg.contains("cannot read"), "{:?}", loaded.warnings);
+    assert!(map.nav.is_empty());
+}
+
+#[test]
+fn a_directory_where_the_keys_file_should_be_is_a_warning() {
+    let dir = keys_dir("isdir");
+    std::fs::create_dir_all(dir.join("keys")).unwrap();
+    let mut map = KeyMap::default();
+    let loaded = file::load_file(None, Some(&dir), &mut map);
+    assert_eq!(1, loaded.warnings.len());
+}
+
+#[test]
+fn the_listing_says_when_there_is_nothing() {
+    let text = listing_text(MapMode::Navigate, &KeyMap::default());
+    assert!(text.contains("# Navigation mappings"), "{text}");
+    assert!(text.contains("No mappings"), "{text}");
+    assert!(text.contains("nnoremap"), "{text}");
+    let text = listing_text(MapMode::RangeSelect, &KeyMap::default());
+    assert!(text.contains("# Range-select mappings"), "{text}");
+    assert!(text.contains("vnoremap"), "{text}");
+}
+
+#[test]
+fn the_listing_shows_mappings_unmapped_keys_and_warnings() {
+    let (mut map, warnings) = load("nnoremap <Space>c yj\nnunmap q\nnnoremap <Nope> j\n");
+    map.warnings = file::load("nnoremap <Nope> j\n", &mut KeyMap::default());
+    map.loaded_from = Some(std::path::PathBuf::from("/home/me/.config/sheetui/keys"));
+    assert_eq!(1, warnings.len());
+    let text = listing_text(MapMode::Navigate, &map);
+    assert!(text.contains("* `<Space>c` \u{2192} `yj`"), "{text}");
+    assert!(text.contains("* `q` \u{2192} (unmapped)"), "{text}");
+    assert!(text.contains("Keys file: /home/me/.config/sheetui/keys"), "{text}");
+    assert!(text.contains("## Warnings"), "{text}");
+    assert!(text.contains("line 1:"), "{text}");
+    assert!(!text.contains("No mappings"), "{text}");
+    // The other mode has no mappings, but the same warnings.
+    let text = listing_text(MapMode::RangeSelect, &map);
+    assert!(text.contains("No mappings"), "{text}");
+    assert!(text.contains("## Warnings"), "{text}");
+}
+
+#[test]
+fn the_listing_prints_commands_in_a_right_hand_side() {
+    let (map, _) = load("nnoremap <Space>s <Cmd>sort skip 1<CR>\n");
+    let text = listing_text(MapMode::Navigate, &map);
+    assert!(text.contains("`<Cmd>sort skip 1<CR>`"), "{text}");
 }

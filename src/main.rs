@@ -24,6 +24,10 @@ pub struct Args {
     /// A theme name or a path to a theme file.
     #[arg(long)]
     theme: Option<String>,
+    /// A keys file of `nnoremap` and `nunmap` lines, instead of the one in the
+    /// config directory.
+    #[arg(long)]
+    keys: Option<PathBuf>,
 }
 
 /// Reads the next event. With a timeout, returns `None` if it ran out first.
@@ -48,6 +52,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, args: Args) -> anyhow::Result<Ex
         ws.state.command_history.use_file(&path);
     }
     ws.init_theme(args.theme.as_deref());
+    ws.init_keys(args.keys.as_deref());
     let mut read_func: ReadFn = if let Some(log_path) = args.log_input {
         {
             let log_file = std::fs::File::create(log_path)?;

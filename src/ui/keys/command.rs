@@ -10,6 +10,16 @@ use super::{
 /// Parses a mapping command. `Ok(None)` means the text is some other command.
 pub fn parse(input: &str) -> Result<Option<MapCommand>, String> {
     let (word, rest) = split_word(input.trim_start());
+    if let "nmap" | "vmap" = word {
+        if !rest.trim().is_empty() {
+            return Err(format!(
+                "Usage: `{word}`. It takes no arguments, `{}` adds a mapping",
+                if word == "nmap" { "nnoremap" } else { "vnoremap" }
+            ));
+        }
+        let mode = if word == "nmap" { MapMode::Navigate } else { MapMode::RangeSelect };
+        return Ok(Some(MapCommand::List(mode)));
+    }
     let (mode, is_map) = match word {
         "nnoremap" => (MapMode::Navigate, true),
         "vnoremap" => (MapMode::RangeSelect, true),

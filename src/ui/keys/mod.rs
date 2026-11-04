@@ -6,6 +6,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 pub mod builtin;
 pub mod command;
+pub mod file;
 pub mod map;
 
 #[cfg(test)]

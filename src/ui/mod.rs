@@ -33,7 +33,7 @@ mod test;
 use cmd::{Cmd, CmdSortKey};
 use keys::{
     builtin::{NavHandler, RangeHandler, Table},
-    map::{resolve, resolve_timeout, KeyMap, Resolution, RhsItem, Target, UserTable},
+    map::{resolve, resolve_timeout, KeyMap, MapCommand, Resolution, RhsItem, Target, UserTable},
     Key,
 };
 pub use history::CommandHistory;
@@ -658,6 +658,11 @@ impl<'ws> Workspace<'ws> {
             return Ok(None);
         }
         match keys::command::parse(&cmd_text) {
+            Ok(Some(MapCommand::List(mode))) => {
+                let text = keys::map::listing_text(mode, &self.state.keymap);
+                self.enter_dialog_mode(Markdown::from_str_themed(&text, &self.state.theme));
+                return Ok(None);
+            }
             Ok(Some(command)) => {
                 if let Err(msg) = self.state.keymap.apply(command) {
                     self.set_message(MessageLevel::Error, msg);
@@ -1400,6 +1405,29 @@ impl<'ws> Workspace<'ws> {
             self.set_theme(theme);
         } else {
             self.apply_theme(&name, theme, warnings);
+        }
+    }
+
+    /// Loads the keys file from `--keys`, else the config directory. Never
+    /// fails: a problem is a warning, counted on the message line and listed by
+    /// `:nmap`.
+    pub fn init_keys(&mut self, flag: Option<&Path>) {
+        self.init_keys_from(flag, lookup::config_dir());
+    }
+
+    fn init_keys_from(&mut self, flag: Option<&Path>, config_dir: Option<PathBuf>) {
+        self.state.keymap.nav = Default::default();
+        self.state.keymap.range = Default::default();
+        let loaded = keys::file::load_file(flag, config_dir.as_deref(), &mut self.state.keymap);
+        let count = loaded.warnings.len();
+        self.state.keymap.loaded_from = loaded.path;
+        self.state.keymap.warnings = loaded.warnings;
+        if count > 0 {
+            let plural = if count == 1 { "" } else { "s" };
+            self.set_message(
+                MessageLevel::Error,
+                format!("keys: {count} warning{plural} (:nmap to list)"),
+            );
         }
     }
 

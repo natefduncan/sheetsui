@@ -987,6 +987,156 @@ fn test_a_timeout_mapping_is_one_undo_step() {
     assert_eq!("", contents_at(&ws, 2));
 }
 
+fn popup_text(ws: &Workspace) -> String {
+    ws.state
+        .popup
+        .as_ref()
+        .expect("no dialog open")
+        .get_text()
+        .lines
+        .iter()
+        .map(|l| l.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn test_init_keys_loads_the_config_dir_file() {
+    let dir = temp_config_dir("keys-load");
+    std::fs::write(dir.join("keys"), "nnoremap <Space> jj\nnunmap q\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_keys_from(None, Some(dir));
+    assert_eq!(None, message_text(&ws));
+    let row = ws.book.location.row;
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 2, ws.book.location.row);
+    let exit = script().char('q').run(&mut ws).expect("Failed to run script");
+    assert_eq!(None, exit, "q is unmapped");
+}
+
+#[test]
+fn test_init_keys_flag_beats_the_config_dir() {
+    let dir = temp_config_dir("keys-flag");
+    std::fs::write(dir.join("keys"), "nnoremap a j\n").unwrap();
+    let other = dir.join("other.keys");
+    std::fs::write(&other, "nnoremap b k\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_keys_from(Some(&other), Some(dir));
+    assert_eq!(1, ws.state.keymap.nav.mappings().len());
+    assert_eq!(Some(other), ws.state.keymap.loaded_from);
+}
+
+#[test]
+fn test_init_keys_with_no_file_changes_nothing() {
+    let dir = temp_config_dir("keys-none");
+    let mut ws = new_workspace();
+    ws.init_keys_from(None, Some(dir));
+    assert_eq!(None, message_text(&ws));
+    assert!(ws.state.keymap.nav.is_empty());
+    assert_eq!(None, ws.state.keymap.loaded_from);
+    let mut ws = new_workspace();
+    ws.init_keys_from(None, None);
+    assert_eq!(None, message_text(&ws));
+}
+
+#[test]
+fn test_init_keys_counts_warnings_on_the_message_line() {
+    let dir = temp_config_dir("keys-warn");
+    std::fs::write(dir.join("keys"), "nnoremap <Nope> j\nnnoremap a j\nwrite x\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_keys_from(None, Some(dir));
+    assert_eq!(
+        Some("keys: 2 warnings (:nmap to list)".to_owned()),
+        message_text(&ws)
+    );
+    assert_eq!(1, ws.state.keymap.nav.mappings().len(), "the good line loaded");
+    assert_eq!(2, ws.state.keymap.warnings.len());
+}
+
+#[test]
+fn test_init_keys_one_warning_is_singular() {
+    let dir = temp_config_dir("keys-one");
+    std::fs::write(dir.join("keys"), "nnoremap 1 j\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_keys_from(None, Some(dir));
+    assert_eq!(
+        Some("keys: 1 warning (:nmap to list)".to_owned()),
+        message_text(&ws)
+    );
+}
+
+#[test]
+fn test_a_missing_keys_flag_file_is_a_warning_not_a_crash() {
+    let dir = temp_config_dir("keys-missing-flag");
+    let mut ws = new_workspace();
+    ws.init_keys_from(Some(&dir.join("nope")), Some(dir.clone()));
+    assert_eq!(
+        Some("keys: 1 warning (:nmap to list)".to_owned()),
+        message_text(&ws)
+    );
+}
+
+#[test]
+fn test_init_keys_clears_earlier_mappings() {
+    let dir = temp_config_dir("keys-reset");
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "z", "jj");
+    ws.init_keys_from(None, Some(dir));
+    assert!(ws.state.keymap.nav.is_empty());
+}
+
+#[test]
+fn test_nmap_lists_mappings_in_a_dialog() {
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "<Space>c", "yj");
+    run_command(&mut ws, "nmap");
+    assert_eq!(&Modality::Dialog, ws.state.modality());
+    let text = popup_text(&ws);
+    assert!(text.contains("Navigation mappings"), "{text}");
+    assert!(text.contains("<Space>c"), "{text}");
+    assert!(text.contains("yj"), "{text}");
+}
+
+#[test]
+fn test_vmap_lists_range_select_mappings() {
+    let mut ws = new_workspace();
+    map_range(&mut ws, "z", "jj");
+    run_command(&mut ws, "vmap");
+    let text = popup_text(&ws);
+    assert!(text.contains("Range-select mappings"), "{text}");
+    assert!(text.contains("jj"), "{text}");
+}
+
+#[test]
+fn test_nmap_with_nothing_says_so_and_shows_load_warnings() {
+    let dir = temp_config_dir("keys-listing");
+    std::fs::write(dir.join("keys"), "\nnnoremap <Nope> j\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_keys_from(None, Some(dir.clone()));
+    run_command(&mut ws, "nmap");
+    let text = popup_text(&ws);
+    assert!(text.contains("No mappings"), "{text}");
+    assert!(text.contains("line 2:"), "{text}");
+    assert!(text.contains("not a key name"), "{text}");
+    assert!(text.contains(&dir.join("keys").display().to_string()), "{text}");
+}
+
+#[test]
+fn test_nmap_with_arguments_is_an_error_dialog() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "nmap x");
+    assert_eq!(&Modality::Dialog, ws.state.modality());
+    assert!(popup_text(&ws).contains("Usage"));
+}
+
+#[test]
+fn test_a_mapping_can_list_mappings() {
+    let mut ws = new_workspace();
+    map_nav(&mut ws, "<Space>", "<Cmd>nmap<CR>");
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(&Modality::Dialog, ws.state.modality());
+}
+
 macro_rules! assert_help_dialog {
     ($exit : expr) => {{
         let mut ws = new_workspace();
