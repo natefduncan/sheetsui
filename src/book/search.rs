@@ -121,13 +121,26 @@ impl Book {
         Ok(found)
     }
 
-    /// Whether the text of one cell, as `within` says, matches `matcher`.
-    fn cell_matches(&self, sheet: u32, row: i32, col: i32, matcher: &Regex, within: SearchIn) -> bool {
+    /// The text of a cell that a search matches, as `within` says: what
+    /// the sheet shows, or what CellEdit shows. Empty for an empty cell.
+    pub fn search_text(&self, address: &Address, within: SearchIn) -> Result<String> {
+        let (sheet, row, col) = (address.sheet, address.row as i32, address.col as i32);
         let text = match within {
             SearchIn::Value => self.model.get_formatted_cell_value(sheet, row, col),
             SearchIn::Raw => self.model.get_cell_content(sheet, row, col),
         };
-        text.is_ok_and(|text| matcher.is_match(&text))
+        text.map_err(|e| anyhow!(e))
+    }
+
+    /// Whether the text of one cell, as `within` says, matches `matcher`.
+    fn cell_matches(&self, sheet: u32, row: i32, col: i32, matcher: &Regex, within: SearchIn) -> bool {
+        let address = Address {
+            sheet,
+            row: row as usize,
+            col: col as usize,
+        };
+        self.search_text(&address, within)
+            .is_ok_and(|text| matcher.is_match(&text))
     }
 
     fn worksheet_at(&self, sheet: u32) -> Result<&Worksheet> {

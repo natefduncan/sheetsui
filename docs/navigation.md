@@ -54,6 +54,16 @@ in them.
 it keeps going backward. `N` goes the other way, and does not change which
 way `n` goes. Both take a count: `3n` goes to the third match.
 
+`*` searches forward for cells like the one under the cursor, and `#`
+searches backward. The pattern is the cell's whole text, with every character
+that means something in a pattern escaped, so `*` on `Paid` skips `Unpaid`,
+and `*` on `a.b` skips `axb`. The text is the shown value, or the raw contents
+with `:set searchin=raw`: `*` on a cell showing `$12.00` finds the other cells
+that show `$12.00`, and with `searchin=raw` the cells that store `12`, or the
+same formula. `ignorecase` and `smartcase` apply as for `/`. The pattern is the
+last search afterwards, so `n` and `N` go on with it. Both take a count. On an
+empty cell they say `E348: No string under cursor`.
+
 `/` or `?` with no pattern, then `Enter`, searches for the last pattern again,
 in the new direction. With no last pattern it says
 `E35: No previous regular expression`, as do `n` and `N`.

@@ -1312,6 +1312,16 @@ impl<'ws> Workspace<'ws> {
                 self.state.reset_n_prefix();
                 self.search_next(self.state.search.direction.reverse(), count);
             }
+            NavHandler::SearchCellForward => {
+                let count = self.state.get_n_prefix();
+                self.state.reset_n_prefix();
+                self.search_cell(Direction::Forward, count);
+            }
+            NavHandler::SearchCellBackward => {
+                let count = self.state.get_n_prefix();
+                self.state.reset_n_prefix();
+                self.search_cell(Direction::Backward, count);
+            }
             NavHandler::Undo => {
                 self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> { ws.undo() })?;
             }
@@ -1595,6 +1605,32 @@ impl<'ws> Workspace<'ws> {
             }
             Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
         }
+    }
+
+    /// `*` and `#`: searches for cells whose whole text, as `searchin` says,
+    /// is the current cell's, so `Paid` skips `Unpaid`. The pattern becomes
+    /// the last search, so `n` and `N` go on with it.
+    fn search_cell(&mut self, direction: Direction, count: usize) {
+        let within = self.state.options.searchin();
+        let text = match self.book.search_text(&self.book.location, within) {
+            Ok(text) => text,
+            Err(e) => {
+                self.set_message(MessageLevel::Error, e.to_string());
+                return;
+            }
+        };
+        if text.is_empty() {
+            self.set_message(MessageLevel::Error, "E348: No string under cursor".to_owned());
+            return;
+        }
+        let pattern = format!("^{}$", regex::escape(&text));
+        let case = self.case_options();
+        if let Err(msg) = self.state.search.set_pattern(&pattern, case) {
+            self.set_message(MessageLevel::Error, msg);
+            return;
+        }
+        self.state.search.direction = direction;
+        self.search_next(direction, count);
     }
 
     /// The search to highlight and the text it matches: `None` when

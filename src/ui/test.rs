@@ -5,6 +5,7 @@ use tui_prompts::State;
 use serial_test::serial;
 
 use crate::book;
+use crate::book::search::Direction;
 use ironcalc::base::types::Color;
 use crate::ui::cmd::parse_color;
 use crate::ui::keys::{
@@ -3738,6 +3739,166 @@ fn test_set_searchin_bad_value_is_an_error() {
     assert_eq!(book::search::SearchIn::Value, ws.state.options.searchin());
     run_command(&mut ws, "set searchin?");
     assert_eq!(Some("searchin=value".to_owned()), last_message(&ws));
+}
+
+// ---------------------------------------------------------------------------
+// Search: * and #
+// ---------------------------------------------------------------------------
+
+/// A workspace with `Paid` at A1 and B2, `Unpaid` at B1 and `paid` at A2,
+/// cursor on A1.
+fn star_workspace<'a>() -> Workspace<'a> {
+    let book = book::Book::from_csv_reader("Paid,Unpaid\npaid,Paid\n".as_bytes(), None)
+        .expect("csv");
+    Workspace::new(book, std::path::PathBuf::from("star.sui"))
+}
+
+#[test]
+fn test_star_finds_cells_like_this_one_and_skips_partial_matches() {
+    let mut ws = star_workspace();
+    script().char('*').run(&mut ws).expect("run");
+    // `Unpaid` holds `Paid`, but `*` matches the whole cell.
+    assert_eq!((2, 2), at(&ws));
+    assert_eq!(None, last_message(&ws));
+    // It is the last search now, going forward: `n` wraps back to A1.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(
+        Some("search hit BOTTOM, continuing at TOP".to_owned()),
+        last_message(&ws)
+    );
+    script().char('N').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    let case = Default::default();
+    let pattern = ws.state.search.last(case).map(|l| l.expect("valid").0.to_owned());
+    assert_eq!(Some("^Paid$".to_owned()), pattern);
+}
+
+#[test]
+fn test_hash_searches_backward_and_n_keeps_going_backward() {
+    let mut ws = star_workspace();
+    script().char('#').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    assert_eq!(
+        Some("search hit TOP, continuing at BOTTOM".to_owned()),
+        last_message(&ws)
+    );
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(Direction::Backward, ws.state.search.direction);
+}
+
+#[test]
+fn test_star_follows_ignorecase() {
+    let mut ws = star_workspace();
+    run_command(&mut ws, "set ignorecase");
+    script().char('*').run(&mut ws).expect("run");
+    assert_eq!((2, 1), at(&ws));
+}
+
+#[test]
+fn test_star_takes_a_count() {
+    let mut ws = search_workspace();
+    script().chars("2*").run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+}
+
+#[test]
+fn test_star_on_an_empty_cell_is_an_error() {
+    let mut ws = star_workspace();
+    script().char('/').chars("Unpaid").enter().run(&mut ws).expect("run");
+    script().chars("jj").run(&mut ws).expect("run");
+    assert_eq!((3, 2), at(&ws));
+    for key in ['*', '#'] {
+        script().char(key).run(&mut ws).expect("run");
+        assert_eq!((3, 2), at(&ws));
+        assert_eq!(Some("E348: No string under cursor".to_owned()), last_message(&ws));
+    }
+    // The last search is unchanged.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+}
+
+#[test]
+fn test_star_escapes_regex_metacharacters() {
+    let text = "a.b(c)$,axb(c)$,a.b(c)$\n[x]+?*^|\\{1},x,[x]+?*^|\\{1}\n";
+    let book = book::Book::from_csv_reader(text.as_bytes(), None).expect("csv");
+    let mut ws = Workspace::new(book, std::path::PathBuf::from("meta.sui"));
+    script().char('*').run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    script().char('j').char('*').run(&mut ws).expect("run");
+    assert_eq!((2, 1), at(&ws));
+    assert_eq!(None, last_message(&ws).filter(|m| !m.starts_with("search hit")));
+    script().char('*').run(&mut ws).expect("run");
+    assert_eq!((2, 3), at(&ws));
+}
+
+/// A workspace with `$12.00` at A1, `12` at B1, `$12.00` at C1, and
+/// `=B1*2` at A2 and B2, cursor on A1.
+fn star_formats_workspace<'a>() -> Workspace<'a> {
+    let mut book = book::Book::from_csv_reader("".as_bytes(), None).expect("csv");
+    let cells = [
+        (1, 1, "$12.00"),
+        (1, 2, "12"),
+        (1, 3, "$12.00"),
+        (2, 1, "=B1*2"),
+        (2, 2, "=B1*2"),
+    ];
+    for (row, col, text) in cells {
+        book.update_cell(&Address { sheet: 0, row, col }, text).expect("set");
+    }
+    book.evaluate();
+    Workspace::new(book, std::path::PathBuf::from("formats.sui"))
+}
+
+#[test]
+fn test_star_on_a_currency_cell_uses_the_shown_value() {
+    let mut ws = star_formats_workspace();
+    script().char('*').run(&mut ws).expect("run");
+    // B1 shows `12`, not `$12.00`.
+    assert_eq!((1, 3), at(&ws));
+    let case = Default::default();
+    let pattern = ws.state.search.last(case).map(|l| l.expect("valid").0.to_owned());
+    assert_eq!(Some("^\\$12\\.00$".to_owned()), pattern);
+}
+
+#[test]
+fn test_star_with_searchin_raw_uses_the_stored_text() {
+    let mut ws = star_formats_workspace();
+    run_command(&mut ws, "set searchin=raw");
+    // A1 stores `12`, like B1.
+    script().char('*').run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    // A formula is matched on its formula text.
+    script().char('j').char('*').run(&mut ws).expect("run");
+    assert_eq!((2, 1), at(&ws));
+    script().char('*').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    let case = Default::default();
+    let pattern = ws.state.search.last(case).map(|l| l.expect("valid").0.to_owned());
+    assert_eq!(Some("^=B1\\*2$".to_owned()), pattern);
+}
+
+#[test]
+fn test_star_on_a_formula_with_searchin_value_uses_its_result() {
+    let mut ws = star_formats_workspace();
+    script().char('j').char('*').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    let case = Default::default();
+    let pattern = ws.state.search.last(case).map(|l| l.expect("valid").0.to_owned());
+    assert_eq!(Some("^24$".to_owned()), pattern);
+}
+
+#[test]
+fn test_star_and_hash_can_be_remapped() {
+    let mut ws = star_workspace();
+    type_command(&mut ws, "nnoremap ; *");
+    type_command(&mut ws, "nunmap #");
+    script().char(';').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    script().char('#').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    assert_eq!(Direction::Forward, ws.state.search.direction);
 }
 
 // ---------------------------------------------------------------------------
