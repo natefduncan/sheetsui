@@ -1272,9 +1272,19 @@ impl<'ws> Workspace<'ws> {
                 self.state.reset_n_prefix();
                 self.enter_search_mode(Direction::Forward);
             }
-            NavHandler::SearchNext => {
+            NavHandler::SearchBackward => {
                 self.state.reset_n_prefix();
-                self.search_next();
+                self.enter_search_mode(Direction::Backward);
+            }
+            NavHandler::SearchNext => {
+                let count = self.state.get_n_prefix();
+                self.state.reset_n_prefix();
+                self.search_next(self.state.search.direction, count);
+            }
+            NavHandler::SearchPrev => {
+                let count = self.state.get_n_prefix();
+                self.state.reset_n_prefix();
+                self.search_next(self.state.search.direction.reverse(), count);
             }
             NavHandler::Undo => {
                 self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> { ws.undo() })?;
@@ -1385,28 +1395,34 @@ impl<'ws> Workspace<'ws> {
         self.state.command_state.focus();
     }
 
+    /// Opens the `/` or `?` prompt. The direction is the last search's only
+    /// once the user presses Enter.
     fn enter_search_mode(&mut self, direction: Direction) {
-        self.state.search.direction = direction;
+        self.state.search.prompt = direction;
         self.state.modality_stack.push(Modality::Search);
         self.state.search_prompt.truncate();
         *self.state.search_prompt.status_mut() = Status::Pending;
         self.state.search_prompt.focus();
     }
 
-    /// Enter in the `/` prompt: searches for the pattern. An empty pattern
-    /// does nothing.
+    /// Enter in the `/` or `?` prompt: searches for the pattern in the
+    /// prompt's direction. An empty pattern repeats the last one.
     fn exit_search_mode(&mut self) -> Result<Option<ExitCode>> {
         let pattern = self.state.search_prompt.value().to_owned();
         self.state.search_prompt.blur();
         *self.state.search_prompt.status_mut() = Status::Done;
         self.state.pop_modality();
-        if pattern.is_empty() {
-            return Ok(None);
+        if !pattern.is_empty() {
+            if let Err(msg) = self.state.search.set_pattern(&pattern) {
+                self.set_message(MessageLevel::Error, msg);
+                return Ok(None);
+            }
         }
-        match self.state.search.set_pattern(&pattern) {
-            Ok(_) => self.search_next(),
-            Err(msg) => self.set_message(MessageLevel::Error, msg),
-        }
+        // With no last pattern the direction does not matter: `search_next`
+        // says E35 either way.
+        let direction = self.state.search.prompt;
+        self.state.search.direction = direction;
+        self.search_next(direction, 1);
         Ok(None)
     }
 
@@ -1418,9 +1434,10 @@ impl<'ws> Workspace<'ws> {
         Ok(None)
     }
 
-    /// Moves to the next match of the last search, in its direction. A miss
-    /// or a wrap is reported on the message line.
-    fn search_next(&mut self) {
+    /// Moves to the `count`th next match of the last search, going in
+    /// `direction`. A miss or a wrap is reported on the message line; a miss
+    /// leaves the cursor where it was.
+    fn search_next(&mut self, direction: Direction, count: usize) {
         let Some((pattern, matcher)) = self.state.search.last() else {
             self.set_message(
                 MessageLevel::Error,
@@ -1428,17 +1445,33 @@ impl<'ws> Workspace<'ws> {
             );
             return;
         };
-        let direction = self.state.search.direction;
-        let from = self.book.location.clone();
-        let found = self
-            .book
-            .search(from.sheet, matcher, &from, direction, true);
+        let mut from = self.book.location.clone();
+        let mut found = Ok(None);
+        let mut wrapped = false;
+        let mut first = None;
+        let mut remaining = count.max(1);
+        let mut step = 0;
+        while remaining > 0 {
+            found = self.book.search(from.sheet, matcher, &from, direction, true);
+            let Ok(Some(hit)) = &found else { break };
+            remaining -= 1;
+            step += 1;
+            wrapped |= hit.wrapped;
+            from = hit.address.clone();
+            // Back at the first match: the matches repeat every `step - 1`,
+            // so a huge count skips the whole laps instead of walking them.
+            match &first {
+                None => first = Some(hit.address.clone()),
+                Some(start) if *start == hit.address && step > 1 => remaining %= step - 1,
+                Some(_) => {}
+            }
+        }
         match found {
             Ok(Some(hit)) => {
                 // `move_to` cannot fail; it only sets the row and column.
                 let _ = self.book.move_to(&hit.address);
                 self.handle_movement_change();
-                if hit.wrapped {
+                if wrapped {
                     let text = match direction {
                         Direction::Forward => "search hit BOTTOM, continuing at TOP",
                         Direction::Backward => "search hit TOP, continuing at BOTTOM",

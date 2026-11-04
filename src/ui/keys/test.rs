@@ -1208,3 +1208,11 @@ fn the_docs_cover_the_commands_and_the_flag() {
     assert!(include_str!("../../../docs/index.md").contains("--keys <KEYS>"));
     assert!(include_str!("../../../docs/intro.md").contains("`help keys`"));
 }
+
+#[test]
+fn search_group_lists_every_search_key() {
+    let out = help::expand("{{keys:search}}\n", MapMode::Navigate, &KeyMap::default());
+    for key in ["`/`", "`?`", "`n`", "`N`"] {
+        assert!(out.contains(key), "{key} missing from {out}");
+    }
+}

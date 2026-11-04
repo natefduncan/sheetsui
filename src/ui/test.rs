@@ -3370,3 +3370,165 @@ fn test_search_prompt_is_drawn() {
     assert!(rows.iter().any(|r| r.contains("/") && r.contains("x+")), "{rows:#?}");
     assert!(rows.last().unwrap().contains("search"), "{rows:#?}");
 }
+
+// ---------------------------------------------------------------------------
+// Search: ?, N, counts and empty-pattern repeat
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_question_mark_searches_backward_and_wraps() {
+    let mut ws = search_workspace();
+    script().char('?').run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Search), ws.state.modality_stack.last());
+    script().chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!((3, 1), at(&ws));
+    assert_eq!(
+        Some("search hit TOP, continuing at BOTTOM".to_owned()),
+        last_message(&ws)
+    );
+    // `n` keeps going backward.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    assert_eq!(None, last_message(&ws));
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+}
+
+#[test]
+fn test_capital_n_reverses_the_last_direction() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    script().char('N').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    script().char('N').run(&mut ws).expect("run");
+    assert_eq!((3, 1), at(&ws));
+    assert_eq!(
+        Some("search hit TOP, continuing at BOTTOM".to_owned()),
+        last_message(&ws)
+    );
+    // `N` does not change the direction `n` goes.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(
+        Some("search hit BOTTOM, continuing at TOP".to_owned()),
+        last_message(&ws)
+    );
+    // After `?`, `N` goes forward.
+    script().char('?').chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!((3, 1), at(&ws));
+    script().char('N').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(
+        Some("search hit BOTTOM, continuing at TOP".to_owned()),
+        last_message(&ws)
+    );
+}
+
+#[test]
+fn test_capital_n_with_no_previous_search() {
+    let mut ws = search_workspace();
+    script().char('N').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(
+        Some("E35: No previous regular expression".to_owned()),
+        last_message(&ws)
+    );
+}
+
+#[test]
+fn test_counts_for_n_and_capital_n() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    script().chars("2n").run(&mut ws).expect("run");
+    assert_eq!((3, 1), at(&ws));
+    assert_eq!(None, last_message(&ws));
+    script().chars("2N").run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    // A count that goes past the end wraps, and says so.
+    script().chars("3n").run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(
+        Some("search hit BOTTOM, continuing at TOP".to_owned()),
+        last_message(&ws)
+    );
+    // The count is used up.
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    // A count with no match still says E486 and leaves the cursor.
+    script().char('/').chars("nope").enter().run(&mut ws).expect("run");
+    script().chars("3n").run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    assert_eq!(Some("E486: Pattern not found: nope".to_owned()), last_message(&ws));
+    // And the count does not leak into the next key.
+    script().char('j').run(&mut ws).expect("run");
+    assert_eq!((2, 3), at(&ws));
+}
+
+#[test]
+fn test_empty_pattern_repeats_the_last_one() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    script().char('/').enter().run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    // `?` with no pattern repeats it backward, and `n` then goes backward.
+    script().char('?').enter().run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+}
+
+#[test]
+fn test_empty_pattern_with_no_previous_search() {
+    let mut ws = search_workspace();
+    script().char('/').enter().run(&mut ws).expect("run");
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(
+        Some("E35: No previous regular expression".to_owned()),
+        last_message(&ws)
+    );
+    script().char('?').enter().run(&mut ws).expect("run");
+    assert_eq!(
+        Some("E35: No previous regular expression".to_owned()),
+        last_message(&ws)
+    );
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_esc_from_question_mark_keeps_the_direction() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    script().char('?').chars("y").esc().run(&mut ws).expect("run");
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+}
+
+#[test]
+fn test_backward_search_prompt_is_drawn_with_a_question_mark() {
+    use ratatui::{backend::TestBackend, Terminal};
+    let mut ws = search_workspace();
+    script().char('?').chars("x+").run(&mut ws).expect("run");
+    let mut term = Terminal::new(TestBackend::new(60, 16)).expect("terminal");
+    term.draw(|f| super::render::draw(f, &mut ws)).expect("draw");
+    let buf = term.backend().buffer().clone();
+    let rows: Vec<String> = (0..buf.area.height)
+        .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol().to_owned()).collect())
+        .collect();
+    assert!(rows.iter().any(|r| r.contains("?") && r.contains("x+")), "{rows:#?}");
+}
+
+#[test]
+fn test_a_huge_count_does_not_walk_every_lap() {
+    let mut ws = search_workspace();
+    script().char('/').chars("x").enter().run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    // Four matches: 4k + 1 steps from C1 lands on B2, the next one.
+    script().chars("400000000001n").run(&mut ws).expect("run");
+    assert_eq!((2, 2), at(&ws));
+    assert_eq!(
+        Some("search hit BOTTOM, continuing at TOP".to_owned()),
+        last_message(&ws)
+    );
+}

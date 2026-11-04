@@ -4,13 +4,35 @@ use regex::Regex;
 
 use crate::book::search::Direction;
 
+impl Direction {
+    /// The other way.
+    pub fn reverse(self) -> Self {
+        match self {
+            Direction::Forward => Direction::Backward,
+            Direction::Backward => Direction::Forward,
+        }
+    }
+
+    /// The key that opens a prompt going this way.
+    pub fn prompt_key(self) -> &'static str {
+        match self {
+            Direction::Forward => "/",
+            Direction::Backward => "?",
+        }
+    }
+}
+
 /// The last search, kept so `n` repeats it without compiling it again.
 #[derive(Debug, Default)]
 pub struct SearchState {
     /// The last pattern searched for, as typed, and its compiled form.
     last: Option<(String, Regex)>,
-    /// The direction of the last search.
+    /// The direction of the last search. `n` goes this way, `N` the other.
     pub direction: Direction,
+    /// The direction of the open prompt: forward for `/`, backward for `?`.
+    /// It becomes the search's direction on Enter, not before, so `Esc`
+    /// leaves `n` going the way it went.
+    pub prompt: Direction,
 }
 
 impl SearchState {

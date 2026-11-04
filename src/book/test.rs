@@ -1142,3 +1142,15 @@ fn test_search_other_sheets_are_not_searched() {
     book.evaluate();
     assert_eq!(None, find(&book, "hit", (1, 1), Direction::Forward, true));
 }
+
+#[test]
+fn test_search_backward_from_beyond_the_used_range() {
+    let book = csv_book("a,hit\nc,d\n");
+    // Every cell is before the cursor, so nothing wraps.
+    assert_eq!(
+        Some(((1, 2), false)),
+        find(&book, "hit", (9, 9), Direction::Backward, false)
+    );
+    // From before the first cell, backward wraps to the last.
+    assert_eq!(Some(((2, 2), true)), find(&book, "d", (1, 1), Direction::Backward, true));
+}

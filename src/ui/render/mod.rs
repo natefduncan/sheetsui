@@ -96,7 +96,7 @@ impl<'ws> Workspace<'ws> {
             cs.push(Constraint::Max(1));
             rs.push(Box::new(|rect: Rect, buf: &mut Buffer, ws: &mut Self| {
                 StatefulWidget::render(
-                    TextPrompt::from("/"),
+                    TextPrompt::from(ws.state.search.prompt.prompt_key()),
                     rect,
                     buf,
                     &mut ws.state.search_prompt,

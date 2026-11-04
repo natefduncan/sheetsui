@@ -46,11 +46,21 @@ open a file, and it is not saved when you quit.
 
 Type `/`, then a pattern, then `Enter`. The cursor goes to the next cell after
 it whose displayed value matches the pattern: left to right across a row, then
-the next row down. `n` goes to the next match. Only the current sheet is
-searched, and only cells that have something in them.
+the next row down. `?` does the same backward: right to left, then the row
+above. Only the current sheet is searched, and only cells that have something
+in them.
+
+`n` goes to the next match in the direction of the last search, so after `?`
+it keeps going backward. `N` goes the other way, and does not change which
+way `n` goes. Both take a count: `3n` goes to the third match.
+
+`/` or `?` with no pattern, then `Enter`, searches for the last pattern again,
+in the new direction. With no last pattern it says
+`E35: No previous regular expression`, as do `n` and `N`.
 
 A search that passes the last cell goes on from the first one and says
-`search hit BOTTOM, continuing at TOP`. A pattern with no match says
+`search hit BOTTOM, continuing at TOP`; backward, it says
+`search hit TOP, continuing at BOTTOM`. A pattern with no match says
 `E486: Pattern not found` and leaves the cursor where it is. `Esc` closes the
 prompt without searching.
 
