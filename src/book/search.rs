@@ -143,6 +143,36 @@ impl Book {
             .is_ok_and(|text| matcher.is_match(&text))
     }
 
+    /// The cells of `sheet` that have content, in row-major order, as a
+    /// search visits them: a merged cell is its top left cell, and an array
+    /// formula's spilled values are not cells of their own. With `within`,
+    /// only those inside the rectangle between the two corners. `:%s` and
+    /// `:'<,'>s` replace in these.
+    pub fn content_cells(
+        &self,
+        sheet: u32,
+        within: Option<(&Address, &Address)>,
+    ) -> Result<Vec<Address>> {
+        let inside = |row: i32, col: i32| match within {
+            None => true,
+            Some((a, b)) => {
+                let (row, col) = (row as usize, col as usize);
+                (a.row.min(b.row)..=a.row.max(b.row)).contains(&row)
+                    && (a.col.min(b.col)..=a.col.max(b.col)).contains(&col)
+            }
+        };
+        Ok(self
+            .searchable_cells(sheet)?
+            .into_iter()
+            .filter(|&(row, col)| inside(row, col))
+            .map(|(row, col)| Address {
+                sheet,
+                row: row as usize,
+                col: col as usize,
+            })
+            .collect())
+    }
+
     fn worksheet_at(&self, sheet: u32) -> Result<&Worksheet> {
         self.model
             .get_model()

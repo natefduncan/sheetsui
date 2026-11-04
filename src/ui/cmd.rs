@@ -2,6 +2,8 @@
 use ironcalc::base::expressions::utils::{column_to_number, is_valid_column};
 use slice_utils::{Measured, Peekable, Seekable, Span, StrCursor};
 
+use crate::book::substitute::{is_delimiter, Scope};
+
 /// A parsed command entered in during command mode.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Cmd<'a> {
@@ -21,9 +23,13 @@ pub enum Cmd<'a> {
     Set(&'a str),
     /// `:noh`: hide the search highlight until the next search.
     NoHighlight,
-    /// `:s/pat/rep/flags` on the current cell: the text from the delimiter
-    /// on, still to parse. See `book/substitute.rs`.
-    Substitute(&'a str),
+    /// `:s/pat/rep/flags`, with `%` or `'<,'>` in front for a scope other
+    /// than the current cell. `text` is from the delimiter on, still to
+    /// parse. See `book/substitute.rs`.
+    Substitute {
+        scope: Scope,
+        text: &'a str,
+    },
     ExportCsv(&'a str),
     SystemPaste,
     Sort { skip: usize, keys: Vec<CmdSortKey> },
@@ -40,8 +46,21 @@ pub struct CmdSortKey {
     pub ascending: bool,
 }
 
+/// The range of the last range selection, which `:` in Range Select puts in
+/// the prompt.
+pub const SELECTION_RANGE: &str = "'<,'>";
+
 /// Parse command text into a `Cmd`.
 pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    // Only `:s` gives the selection range a meaning. Other commands typed in
+    // Range Select, like `:sort`, already act on the selection, so they
+    // take the range `:` pre-fills and ignore it.
+    if let Some(rest) = input.strip_prefix(SELECTION_RANGE) {
+        if let Some(cmd) = try_consume_substitute(rest, Scope::Selection)? {
+            return Ok(Some(cmd));
+        }
+        return parse(rest);
+    }
     let cursor = StrCursor::new(input);
     // try consume write command.
     if let Some(cmd) = try_consume_write(cursor.clone())? {
@@ -111,7 +130,7 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     // Last: `s` starts other commands, which a letter after it tells apart.
-    if let Some(cmd) = try_consume_substitute(cursor.clone())? {
+    if let Some(cmd) = try_consume_substitute(input, Scope::Cell)? {
         return Ok(Some(cmd));
     }
     Ok(None)
@@ -392,18 +411,25 @@ fn try_consume_nohlsearch<'cmd, 'i: 'cmd>(
 }
 
 /// `:s` or `:substitute`, then a delimiter that cannot start a longer
-/// command name, as in vim: `:s/a/b/`, `:s#a#b#`.
+/// command name, as in vim: `:s/a/b/`, `:s#a#b#`. `scope` is the range
+/// already read in front of it. A `%` in front is the whole sheet:
+/// `:%s/a/b/`. Only `:s` takes `%`.
 fn try_consume_substitute<'cmd, 'i: 'cmd>(
-    input: StrCursor<'i>,
+    text: &'i str,
+    scope: Scope,
 ) -> Result<Option<Cmd<'cmd>>, &'static str> {
-    use crate::book::substitute::is_delimiter;
-    let text = input.span(0..);
+    const RANGE_ERROR: &str = "Invalid command: Only `s` takes a range: `%s/pattern/replacement/`";
+    let (scope, text) = match text.strip_prefix('%') {
+        Some(rest) if scope == Scope::Cell => (Scope::Sheet, rest),
+        _ => (scope, text),
+    };
     let Some(rest) = ["substitute", "s"].iter().find_map(|name| text.strip_prefix(name)) else {
-        return Ok(None);
+        return if scope == Scope::Sheet { Err(RANGE_ERROR) } else { Ok(None) };
     };
     match rest.chars().next() {
         None => Err("Invalid command: Did you mean to type `s/pattern/replacement/`?"),
-        Some(c) if is_delimiter(c) => Ok(Some(Cmd::Substitute(rest))),
+        Some(c) if is_delimiter(c) => Ok(Some(Cmd::Substitute { scope, text: rest })),
+        Some(_) if scope == Scope::Sheet => Err(RANGE_ERROR),
         Some(_) => Ok(None),
     }
 }

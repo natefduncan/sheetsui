@@ -65,6 +65,9 @@ pub struct RangeSelection {
     pub original_location: Option<Address>,
     pub start: Option<Address>,
     pub end: Option<Address>,
+    /// The corners of the last selection, kept after Range Select ends, for
+    /// `:'<,'>s`.
+    pub last: Option<(Address, Address)>,
 }
 
 impl RangeSelection {
@@ -89,6 +92,21 @@ impl RangeSelection {
     pub fn reset_range_selection(&mut self) {
         self.start = None;
         self.end = None;
+    }
+
+    /// The selection being made: from its start to its end, or to `cursor`
+    /// if it has no end yet. `None` before a start is set.
+    pub fn current(&self, cursor: &Address) -> Option<(Address, Address)> {
+        let start = self.start.clone()?;
+        let end = self.end.clone().unwrap_or_else(|| cursor.clone());
+        Some((start, end))
+    }
+
+    /// Keep the selection being made as the last one, for `'<,'>`.
+    fn remember(&mut self, cursor: &Address) {
+        if let Some(selection) = self.current(cursor) {
+            self.last = Some(selection);
+        }
     }
 }
 
@@ -759,8 +777,19 @@ impl<'ws> Workspace<'ws> {
                 self.state.search.highlight = false;
                 Ok(None)
             }
-            Ok(Some(Cmd::Substitute(text))) => {
-                match self.substitute_current_cell(text) {
+            Ok(Some(Cmd::Substitute { scope, text })) => {
+                let result = self.substitute(scope, text);
+                // As in vim, a command typed in Range Select ends the
+                // selection. Started from CellEdit, leaving would paste it.
+                let stack = &self.state.modality_stack;
+                if stack.last() == Some(&Modality::RangeSelect)
+                    && stack.get(stack.len().wrapping_sub(2)) == Some(&Modality::Navigate)
+                {
+                    self.exit_range_select_mode()?;
+                }
+                // The current cell may have changed under the cursor.
+                self.handle_movement_change();
+                match result {
                     Ok(msg) => self.set_message(MessageLevel::Info, msg),
                     Err(msg) => self.set_message(MessageLevel::Error, msg),
                 }
@@ -921,6 +950,8 @@ impl<'ws> Workspace<'ws> {
                 self.state.reset_n_prefix();
                 self.finish_keys();
             } else {
+                // Esc ends the selection, but `'<,'>` still gets it, as in vim.
+                self.state.range_select.remember(&self.book.location);
                 self.state.range_select.start = None;
                 self.state.range_select.end = None;
                 self.exit_range_select_mode()?;
@@ -1023,6 +1054,9 @@ impl<'ws> Workspace<'ws> {
             }
             RangeHandler::EnterCommand => {
                 self.enter_command_mode();
+                if self.state.range_select.start.is_some() {
+                    self.set_command_text(cmd::SELECTION_RANGE.to_owned());
+                }
             }
         }
         Ok(None)
@@ -1688,11 +1722,11 @@ impl<'ws> Workspace<'ws> {
         Some((matcher.clone(), self.state.options.searchin()))
     }
 
-    /// The case options a pattern is compiled with.
-    /// Runs `:s` on the current cell. Returns the message for the user: the
-    /// counts, or what went wrong. An empty pattern is the last search's.
-    fn substitute_current_cell(&mut self, text: &str) -> Result<String, String> {
+    /// Runs `:s` on the cells of `scope`. Returns the message for the user:
+    /// the counts, or what went wrong. An empty pattern is the last search's.
+    fn substitute(&mut self, scope: substitute::Scope, text: &str) -> Result<String, String> {
         let command = substitute::parse(text)?;
+        let cells = self.substitute_cells(scope)?;
         let case = self.case_options();
         let (pattern, matcher) = if command.pattern.is_empty() {
             match self.state.search.last(case) {
@@ -1703,10 +1737,9 @@ impl<'ws> Workspace<'ws> {
             let matcher = search::compile(&command.pattern, case)?;
             (command.pattern, matcher)
         };
-        let cell = [self.book.location.clone()];
         let counts = self
             .book
-            .substitute(&cell, &matcher, &command.replacement, command.flags.global)
+            .substitute(&cells, &matcher, &command.replacement, command.flags.global)
             .map_err(|e| e.to_string())?;
         if counts.substitutions == 0 && !command.flags.quiet {
             return Err(format!("E486: Pattern not found: {}", pattern));
@@ -1714,6 +1747,31 @@ impl<'ws> Workspace<'ws> {
         Ok(counts.message())
     }
 
+    /// The cells a `:s` command visits. `'<,'>` is the selection being made
+    /// in Range Select, or else the last one, which must be on the current
+    /// sheet.
+    fn substitute_cells(&self, scope: substitute::Scope) -> Result<Vec<Address>, String> {
+        use substitute::Scope;
+        let location = &self.book.location;
+        let within = match scope {
+            Scope::Cell => return Ok(vec![location.clone()]),
+            Scope::Sheet => None,
+            Scope::Selection => {
+                let selecting = self.state.modality() == &Modality::RangeSelect;
+                let selection = selecting
+                    .then(|| self.state.range_select.current(location))
+                    .flatten()
+                    .or_else(|| self.state.range_select.last.clone())
+                    .filter(|(start, _)| start.sheet == location.sheet);
+                Some(selection.ok_or("E20: Mark not set")?)
+            }
+        };
+        self.book
+            .content_cells(location.sheet, within.as_ref().map(|(a, b)| (a, b)))
+            .map_err(|e| e.to_string())
+    }
+
+    /// The case options a pattern is compiled with.
     fn case_options(&self) -> CaseOptions {
         CaseOptions {
             ignorecase: self.state.options.ignorecase(),
@@ -1884,6 +1942,7 @@ impl<'ws> Workspace<'ws> {
     }
 
     fn exit_range_select_mode(&mut self) -> Result<()> {
+        self.state.range_select.remember(&self.book.location);
         self.book.location = self
             .state
             .range_select

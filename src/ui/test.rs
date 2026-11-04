@@ -4234,9 +4234,11 @@ fn cell_text(ws: &Workspace, row: usize, col: usize) -> String {
 #[test]
 fn test_parse_substitute_command() {
     use super::cmd::{parse, Cmd};
-    assert_eq!(parse("s/a/b/g"), Ok(Some(Cmd::Substitute("/a/b/g"))));
-    assert_eq!(parse("s#a#b#"), Ok(Some(Cmd::Substitute("#a#b#"))));
-    assert_eq!(parse("substitute/a/b/"), Ok(Some(Cmd::Substitute("/a/b/"))));
+    use crate::book::substitute::Scope;
+    let cell = |text| Ok(Some(Cmd::Substitute { scope: Scope::Cell, text }));
+    assert_eq!(parse("s/a/b/g"), cell("/a/b/g"));
+    assert_eq!(parse("s#a#b#"), cell("#a#b#"));
+    assert_eq!(parse("substitute/a/b/"), cell("/a/b/"));
     assert!(parse("s").is_err());
     // Other commands that start with `s` still parse as themselves.
     assert_eq!(parse("set ic"), Ok(Some(Cmd::Set("ic"))));
@@ -4350,4 +4352,177 @@ fn test_substitute_goes_into_the_command_history() {
     run_command(&mut ws, "s/a/o/");
     script().char(':').up().run(&mut ws).expect("run");
     assert_eq!(ws.state.command_state.value(), "s/a/o/");
+}
+
+// ---------------------------------------------------------------------------
+// Replace: :%s and :'<,'>s scopes
+// ---------------------------------------------------------------------------
+
+/// A workspace with a 3 by 3 grid of `a`s, cursor on A1.
+fn grid_workspace<'a>() -> Workspace<'a> {
+    let book = book::Book::from_csv_reader("a,a,a\na,a,a\na,a,a\n".as_bytes(), None)
+        .expect("csv");
+    Workspace::new(book, std::path::PathBuf::from("grid.sui"))
+}
+
+/// The grid's cells, row by row, as one string per row.
+fn grid_rows(ws: &Workspace) -> Vec<String> {
+    (1..=3)
+        .map(|row| (1..=3).map(|col| cell_text(ws, row, col)).collect())
+        .collect()
+}
+
+#[test]
+fn test_parse_substitute_scopes() {
+    use super::cmd::{parse, Cmd};
+    use crate::book::substitute::Scope;
+    assert_eq!(
+        parse("%s/a/b/g"),
+        Ok(Some(Cmd::Substitute { scope: Scope::Sheet, text: "/a/b/g" }))
+    );
+    assert_eq!(
+        parse("%substitute#a#b#"),
+        Ok(Some(Cmd::Substitute { scope: Scope::Sheet, text: "#a#b#" }))
+    );
+    assert_eq!(
+        parse("'<,'>s/a/b/"),
+        Ok(Some(Cmd::Substitute { scope: Scope::Selection, text: "/a/b/" }))
+    );
+    assert!(parse("%s").is_err());
+    assert!(parse("'<,'>s").is_err());
+    // Only `:s` takes `%`.
+    assert!(parse("%sort").is_err());
+    assert!(parse("%w").is_err());
+    // Other commands take the selection range `:` pre-fills in Range
+    // Select, and ignore it: they act on the selection there already.
+    assert_eq!(parse("'<,'>w"), Ok(Some(Cmd::Write(None))));
+    assert!(matches!(parse("'<,'>sort"), Ok(Some(Cmd::Sort { .. }))));
+    assert_eq!(parse("'<,'>sx/a/b/"), Ok(None));
+}
+
+#[test]
+fn test_substitute_percent_replaces_in_the_whole_sheet() {
+    let mut ws = grid_workspace();
+    run_command(&mut ws, "%s/a/b/");
+    assert_eq!(vec!["bbb", "bbb", "bbb"], grid_rows(&ws));
+    assert_eq!(Some("9 substitutions on 9 cells".to_owned()), last_message(&ws));
+    assert_eq!((1, 1), at(&ws));
+}
+
+#[test]
+fn test_substitute_percent_is_one_undo_step_and_undo_goes_to_the_first_change() {
+    let mut ws = grid_workspace();
+    ws.book.update_cell(&Address { sheet: 0, row: 1, col: 1 }, "x").expect("set");
+    script().chars("jj").run(&mut ws).expect("run");
+    run_command(&mut ws, "%s/a/b/");
+    assert_eq!(vec!["xbb", "bbb", "bbb"], grid_rows(&ws));
+    assert_eq!((3, 1), at(&ws));
+    script().char('u').run(&mut ws).expect("run");
+    assert_eq!(vec!["xaa", "aaa", "aaa"], grid_rows(&ws));
+    // B1 is the first cell the command changed.
+    assert_eq!((1, 2), at(&ws));
+}
+
+#[test]
+fn test_colon_in_range_select_prefills_the_selection_range() {
+    let mut ws = grid_workspace();
+    script().chars("vjl:").run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Command), ws.state.modality_stack.last());
+    assert_eq!("'<,'>", command_text(&ws));
+    script().chars("s/a/b/").enter().run(&mut ws).expect("run");
+    assert_eq!(vec!["bba", "bba", "aaa"], grid_rows(&ws));
+    assert_eq!(Some("4 substitutions on 4 cells".to_owned()), last_message(&ws));
+    // As in vim, the command ends the selection.
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!((1, 1), at(&ws));
+}
+
+#[test]
+fn test_colon_in_range_select_before_a_start_is_set_does_not_prefill() {
+    let mut ws = grid_workspace();
+    script().ctrl('r').char(':').run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Command), ws.state.modality_stack.last());
+    assert_eq!("", command_text(&ws));
+}
+
+#[test]
+fn test_substitute_selection_uses_the_last_selection_after_it_ends() {
+    let mut ws = grid_workspace();
+    // Select B2:C3, then leave Range Select with Esc.
+    script().chars("jlvjl").esc().run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    run_command(&mut ws, "'<,'>s/a/b/");
+    assert_eq!(vec!["aaa", "abb", "abb"], grid_rows(&ws));
+    // A later selection replaces it.
+    script().chars("hvj").char(' ').run(&mut ws).expect("run");
+    run_command(&mut ws, "'<,'>s/a/c/");
+    assert_eq!(vec!["aaa", "cbb", "cbb"], grid_rows(&ws));
+}
+
+#[test]
+fn test_substitute_selection_is_one_undo_step() {
+    let mut ws = grid_workspace();
+    script().chars("vjjl:").run(&mut ws).expect("run");
+    script().chars("s/a/b/").enter().run(&mut ws).expect("run");
+    assert_eq!(vec!["bba", "bba", "bba"], grid_rows(&ws));
+    script().char('u').run(&mut ws).expect("run");
+    assert_eq!(vec!["aaa", "aaa", "aaa"], grid_rows(&ws));
+}
+
+#[test]
+fn test_substitute_selection_without_one_is_e20() {
+    let mut ws = grid_workspace();
+    run_command(&mut ws, "'<,'>s/a/b/");
+    assert_eq!(Some("E20: Mark not set".to_owned()), last_message(&ws));
+    assert_eq!(ws.state.message.as_ref().map(|m| m.level), Some(super::MessageLevel::Error));
+    assert_eq!(vec!["aaa", "aaa", "aaa"], grid_rows(&ws));
+}
+
+#[test]
+fn test_substitute_selection_on_another_sheet_is_e20() {
+    let mut ws = grid_workspace();
+    script().chars("vj").esc().run(&mut ws).expect("run");
+    run_command(&mut ws, "new-sheet other");
+    run_command(&mut ws, "select-sheet other");
+    assert_eq!(1, ws.book.location.sheet);
+    run_command(&mut ws, "'<,'>s/a/b/");
+    assert_eq!(Some("E20: Mark not set".to_owned()), last_message(&ws));
+    assert_eq!(vec!["aaa", "aaa", "aaa"], grid_rows(&ws));
+}
+
+#[test]
+fn test_substitute_selection_with_an_array_formula_changes_nothing() {
+    let mut book = book::Book::from_csv_reader("3,\n1,\n".as_bytes(), None).expect("csv");
+    book.update_cell(&Address { sheet: 0, row: 1, col: 2 }, "=SORT(A1:A2)").expect("set");
+    book.evaluate();
+    let mut ws = Workspace::new(book, std::path::PathBuf::from("arr.sui"));
+    script().chars("vjl:").run(&mut ws).expect("run");
+    script().chars("s/[0-9A-Z]/x/").enter().run(&mut ws).expect("run");
+    assert_eq!(Some("Cannot substitute in an array formula.".to_owned()), last_message(&ws));
+    assert_eq!(cell_text(&ws, 1, 1), "3");
+    assert_eq!(cell_text(&ws, 1, 2), "=SORT(A1:A2)");
+}
+
+#[test]
+fn test_substitute_percent_skips_the_hidden_part_of_a_merge() {
+    let mut model = ironcalc::base::Model::new_empty("test", "en", "America/New_York", "en")
+        .expect("model");
+    model.workbook.worksheets[0].merge_cells.push("A1:B1".to_string());
+    let mut book = book::Book::from_model(model);
+    for col in 1..=3 {
+        book.update_cell(&Address { sheet: 0, row: 1, col }, "a").expect("set");
+    }
+    let mut ws = Workspace::new(book, std::path::PathBuf::from("merge.sui"));
+    run_command(&mut ws, "%s/a/b/");
+    assert_eq!(Some("2 substitutions on 2 cells".to_owned()), last_message(&ws));
+    assert_eq!(cell_text(&ws, 1, 1), "b");
+    assert_eq!(cell_text(&ws, 1, 2), "a");
+    assert_eq!(cell_text(&ws, 1, 3), "b");
+}
+
+#[test]
+fn test_substitute_refreshes_the_current_cell_contents_box() {
+    let mut ws = sub_workspace();
+    run_command(&mut ws, "%s/a/o/g");
+    assert_eq!(ws.text_area.lines().join("\n"), "bonono");
 }

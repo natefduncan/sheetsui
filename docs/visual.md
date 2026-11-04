@@ -19,6 +19,10 @@ select mode from CellEdit mode with `CTRL-r`.
 column. All of each row moves. They work only when you entered range select
 mode from navigation mode. See the `sort` command for more options.
 
+`:` opens the command prompt with `'<,'>`, the range of the selection, in
+it. `:'<,'>s/pattern/replacement/` replaces in the selected cells. See
+[Replacing](./command.md#replacing).
+
 When you have selected the end of the range you will exit range select mode and
 the range reference will be placed into the cell contents you are editing.
 

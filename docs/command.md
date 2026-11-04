@@ -126,10 +126,28 @@ Flags:
 
 Flags combine, as in `s/a/b/ge`. An unknown flag is an error that names it.
 
+A range in front of `s` replaces in more than the current cell:
+
+* `%s/pattern/replacement/` replaces in every cell with content in the
+  current sheet.
+* `'<,'>s/pattern/replacement/` replaces in the cells of the last range
+  selection. Typing `:` in range select mode puts `'<,'>` in the prompt for
+  you, and running the command ends the selection. The last selection is
+  kept after range select mode ends, even with `Esc`. With no selection on
+  the current sheet it says `E20: Mark not set`.
+
+Only `s` takes `%`. Other commands typed in range select mode, like `sort`,
+already act on the selection, so they ignore the `'<,'>` in front of them.
+
+A merged cell counts as one cell, at its top left. A cell that an array
+formula fills is part of the formula's cell.
+
 `s` says how much it did, for example `3 substitutions on 1 cell`. If nothing
 matches it says `E486: Pattern not found: <pattern>` and changes nothing. It
-cannot edit an array formula, or a cell that one fills. A replacement undoes
-in one step; one that changes nothing is not a step.
+cannot edit an array formula, or a cell that one fills: if one matches,
+nothing changes at all. A replacement undoes in one step however many cells
+it changed, and `u` puts the cursor on the first cell it changed. One that
+changes nothing is not a step.
 
 ## Options
 

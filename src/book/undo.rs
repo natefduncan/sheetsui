@@ -154,6 +154,15 @@ impl Book {
         }
     }
 
+    /// Make undo and redo of the open action put the cursor on `location`
+    /// instead of where the action started. The outermost action is the one
+    /// kept, so this works inside a nested action too.
+    pub(super) fn set_action_location(&mut self, location: &Address) {
+        if let Some(action) = &mut self.undo.open {
+            action.location = location.clone();
+        }
+    }
+
     /// Run `f` as one action.
     pub(super) fn as_action<T>(&mut self, f: impl FnOnce(&mut Self) -> Result<T>) -> Result<T> {
         self.begin_action();

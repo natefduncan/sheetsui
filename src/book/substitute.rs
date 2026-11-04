@@ -23,6 +23,18 @@ pub struct Substitute {
     pub flags: Flags,
 }
 
+/// The cells a `:s` command visits: the range in front of the `s`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Scope {
+    /// `:s`: the current cell.
+    #[default]
+    Cell,
+    /// `:%s`: every cell with content in the current sheet.
+    Sheet,
+    /// `:'<,'>s`: the cells of the last range selection.
+    Selection,
+}
+
 /// The flags after the replacement.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Flags {
@@ -205,7 +217,8 @@ impl Book {
     /// Replaces `matcher` with `replacement` (in the `regex` crate's form) in
     /// the raw contents of `cells`, as one undo step. Each changed cell gets
     /// its new text as if typed. A cell the pattern does not match is not
-    /// touched, and nothing changes if an array formula would have to.
+    /// touched, and nothing changes if an array formula would have to. Undo
+    /// puts the cursor on the first changed cell.
     pub fn substitute(
         &mut self,
         cells: &[Address],
@@ -234,6 +247,7 @@ impl Book {
             return Ok(counts);
         }
         self.as_action(|book| {
+            book.set_action_location(changes[0].0);
             for (address, new) in changes {
                 book.update_cell(address, new)?;
             }

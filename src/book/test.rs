@@ -1420,3 +1420,130 @@ fn test_substitute_groups_and_ampersand_in_a_cell() {
     sub_cell(&mut book, (1, 1), "(\\w+) (\\w+)", "\\2 \\1 (&)", false).expect("sub");
     assert_eq!(rendered(&book, 1, 1), "John Smith (Smith John)");
 }
+
+// -------------------------------------------------------------------------
+// Substitute scopes: `:%s` and `:'<,'>s`
+// -------------------------------------------------------------------------
+
+/// The cells that `content_cells` gives, as (row, col).
+fn content_cells(book: &Book, within: Option<((usize, usize), (usize, usize))>) -> Vec<(usize, usize)> {
+    let within = within.map(|(start, end)| (phase2_addr(start.0, start.1), phase2_addr(end.0, end.1)));
+    book.content_cells(0, within.as_ref().map(|(s, e)| (s, e)))
+        .expect("cells")
+        .into_iter()
+        .map(|a| (a.row, a.col))
+        .collect()
+}
+
+#[test]
+fn test_content_cells_of_the_sheet_in_row_major_order() {
+    let book = csv_book("a,,c\n,e,\ng,h,i\n");
+    assert_eq!(
+        vec![(1, 1), (1, 3), (2, 2), (3, 1), (3, 2), (3, 3)],
+        content_cells(&book, None)
+    );
+}
+
+#[test]
+fn test_content_cells_inside_a_range() {
+    let book = csv_book("a,,c\n,e,\ng,h,i\n");
+    assert_eq!(vec![(2, 2), (3, 2), (3, 3)], content_cells(&book, Some(((2, 2), (3, 3)))));
+    // The corners can come in any order.
+    assert_eq!(vec![(2, 2), (3, 2), (3, 3)], content_cells(&book, Some(((3, 3), (2, 2)))));
+    // A range past the used range is fine.
+    assert_eq!(vec![(3, 3)], content_cells(&book, Some(((3, 3), (99, 99)))));
+}
+
+#[test]
+fn test_content_cells_skip_hidden_merged_and_spilled_cells() {
+    let mut model =
+        Model::new_empty("test", "en", "America/New_York", "en").expect("model");
+    model.workbook.worksheets[0].merge_cells.push("A1:B2".to_string());
+    let mut book = Book::from_model(model);
+    for (row, col) in [(1, 1), (1, 2), (2, 1), (2, 2), (3, 1)] {
+        book.update_cell(&phase2_addr(row, col), "1").expect("set");
+    }
+    book.update_cell(&phase2_addr(1, 3), "=SORT(A1:A3)").expect("set");
+    book.evaluate();
+    assert_eq!(vec![(1, 1), (1, 3), (3, 1)], content_cells(&book, None));
+    // A range over the hidden part of the merge and the spill only.
+    assert_eq!(Vec::<(usize, usize)>::new(), content_cells(&book, Some(((2, 2), (3, 3)))));
+}
+
+#[test]
+fn test_substitute_on_the_whole_sheet_counts_and_is_one_step() {
+    let mut book = csv_book("banana,apple\ncherry,anna\n");
+    let cells = book.content_cells(0, None).expect("cells");
+    let counts = book.substitute(&cells, &re("a"), "o", true).expect("sub");
+    assert_eq!((counts.substitutions, counts.cells), (6, 3));
+    assert_eq!(rendered(&book, 1, 1), "bonono");
+    assert_eq!(rendered(&book, 1, 2), "opple");
+    assert_eq!(rendered(&book, 2, 1), "cherry");
+    assert_eq!(rendered(&book, 2, 2), "onno");
+    assert!(book.undo().expect("undo"));
+    assert_eq!(rendered(&book, 1, 1), "banana");
+    assert_eq!(rendered(&book, 2, 2), "anna");
+    assert!(!book.undo().expect("undo"));
+}
+
+#[test]
+fn test_substitute_in_a_range_leaves_cells_outside_it() {
+    let mut book = csv_book("a,a,a\na,a,a\n");
+    let (start, end) = (phase2_addr(1, 2), phase2_addr(2, 3));
+    let cells = book.content_cells(0, Some((&start, &end))).expect("cells");
+    let counts = book.substitute(&cells, &re("a"), "b", false).expect("sub");
+    assert_eq!((counts.substitutions, counts.cells), (4, 4));
+    assert_eq!(rendered(&book, 1, 1), "a");
+    assert_eq!(rendered(&book, 2, 1), "a");
+    assert_eq!(rendered(&book, 1, 2), "b");
+    assert_eq!(rendered(&book, 2, 3), "b");
+}
+
+#[test]
+fn test_substitute_array_formula_in_a_range_refuses_before_any_write() {
+    let mut book = csv_book("3,\n1,\n2,\n");
+    book.update_cell(&phase2_addr(1, 2), "=SORT(A1:A3)").expect("set");
+    book.evaluate();
+    let (start, end) = (phase2_addr(1, 1), phase2_addr(3, 2));
+    let cells = book.content_cells(0, Some((&start, &end))).expect("cells");
+    // A1 matches first, but nothing is written because B1 is an array.
+    let err = book.substitute(&cells, &re("[0-9A-Z]"), "x", true).expect_err("array");
+    assert!(err.to_string().contains("array formula"), "{}", err);
+    assert_eq!(rendered(&book, 1, 1), "3");
+    assert_eq!(contents(&book, 1, 2), "=SORT(A1:A3)");
+    // A pattern that skips the array formula edits the other cells; the
+    // spilled values are not cells of their own.
+    let counts = book.substitute(&cells, &re("^[0-9]$"), "9", false).expect("sub");
+    assert_eq!((counts.substitutions, counts.cells), (3, 3));
+    assert_eq!(contents(&book, 1, 2), "=SORT(A1:A3)");
+}
+
+#[test]
+fn test_substitute_undo_puts_the_cursor_on_the_first_changed_cell() {
+    let mut book = csv_book("x,y\nz,y\n");
+    book.location = phase2_addr(1, 1);
+    let cells = book.content_cells(0, None).expect("cells");
+    book.substitute(&cells, &re("y"), "w", false).expect("sub");
+    // The cursor stays where it was.
+    assert_eq!(book.location, phase2_addr(1, 1));
+    book.location = phase2_addr(5, 5);
+    assert!(book.undo().expect("undo"));
+    assert_eq!(book.location, phase2_addr(1, 2));
+    assert_eq!(rendered(&book, 2, 2), "y");
+}
+
+#[test]
+fn test_substitute_on_a_large_sheet_is_one_undo_step() {
+    let row = vec!["a"; 20].join(",");
+    let text = vec![row; 250].join("\n");
+    let mut book = csv_book(&text);
+    let cells = book.content_cells(0, None).expect("cells");
+    assert_eq!(cells.len(), 5000);
+    let counts = book.substitute(&cells, &re("a"), "b", false).expect("sub");
+    assert_eq!((counts.substitutions, counts.cells), (5000, 5000));
+    assert_eq!(rendered(&book, 250, 20), "b");
+    assert!(book.undo().expect("undo"));
+    assert_eq!(rendered(&book, 1, 1), "a");
+    assert_eq!(rendered(&book, 250, 20), "a");
+    assert!(!book.undo().expect("undo"));
+}
