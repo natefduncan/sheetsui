@@ -1,7 +1,7 @@
 # Range Select Mode
 
 Range Select mode copies a range reference for use later or delete a range's contents. You can enter range
-select mode from CellEdit mode with `CTRL-r`.
+select mode from CellEdit mode with `CTRL-r`, or from navigation mode with `Alt-r`.
 
 ## Moving
 

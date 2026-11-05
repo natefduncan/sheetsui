@@ -516,7 +516,7 @@ fn test_bare_and_ctrl_keys_are_different_keys() {
     let mut ws = new_workspace();
     script().char('r').run(&mut ws).expect("Failed to run script");
     assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
-    script().ctrl('r').run(&mut ws).expect("Failed to run script");
+    script().alt('r').run(&mut ws).expect("Failed to run script");
     assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
 
     let mut ws = new_workspace();
@@ -1398,7 +1398,7 @@ fn test_range_copy() {
     ws.book.move_to(&address).expect("Failed to move to row");
     let original_loc = ws.book.location.clone();
     script()
-        .ctrl('r')
+        .alt('r')
         .run(&mut ws)
         .expect("Failed to handle 'Ctrl-r' key event");
     assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
@@ -1973,7 +1973,7 @@ fn test_range_select_movement() {
         .new_sheet(Some("s3"))
         .expect("Unable create s3 sheet");
     script()
-        .ctrl('r')
+        .alt('r')
         .run(&mut ws)
         .expect("failed to run script");
     assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
@@ -2034,7 +2034,7 @@ macro_rules! assert_range_copy {
             .expect("Failed to update top left");
         assert!(ws.state.clipboard.is_none());
         script()
-            .ctrl('r')
+            .alt('r')
             .char('j')
             .char('l')
             .char(' ')
@@ -2432,7 +2432,7 @@ fn test_range_copy_writes_system_clipboard_csv() {
     ws.book.evaluate();
     script()
         .char('h')
-        .ctrl('r')
+        .alt('r')
         .char(' ')
         .char('l')
         .char('y')
@@ -2877,7 +2877,7 @@ fn test_range_select_shift_s_sorts_ascending_by_cursor_column() {
 fn test_range_select_s_without_range_start_does_nothing() {
     let mut ws = sort_workspace(&[&["1"], &["2"]]);
     script()
-        .ctrl('r')
+        .alt('r')
         .char('j')
         .char('s')
         .run(&mut ws)
@@ -4532,7 +4532,7 @@ fn test_colon_in_range_select_prefills_the_selection_range() {
 #[test]
 fn test_colon_in_range_select_before_a_start_is_set_does_not_prefill() {
     let mut ws = grid_workspace();
-    script().ctrl('r').char(':').run(&mut ws).expect("run");
+    script().alt('r').char(':').run(&mut ws).expect("run");
     assert_eq!(Some(&Modality::Command), ws.state.modality_stack.last());
     assert_eq!("", command_text(&ws));
 }
@@ -5225,4 +5225,62 @@ fn test_fill_down_on_row_one_is_a_dialog_and_changes_nothing() {
     script().ctrl('d').run(&mut ws).expect("fill");
     assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
     assert!(!ws.book.dirty);
+}
+
+#[test]
+fn test_fill_right_cmd_forms() {
+    assert_eq!(Cmd::FillRight(1), parse("fill-right").unwrap().unwrap());
+    assert_eq!(Cmd::FillRight(5), parse("fill-right 5").unwrap().unwrap());
+    assert!(parse("fill-right x").is_err());
+    assert!(parse("fill-rightx").is_err());
+}
+
+#[test]
+fn test_ctrl_r_fills_the_cell_to_the_left_right() {
+    let mut ws = sort_workspace(&[&["1"], &["=A1+1"]]);
+    script().char('j').char('l').run(&mut ws).expect("move");
+    script().ctrl('r').run(&mut ws).expect("fill");
+    assert_eq!(
+        "=B1+1",
+        ws.book.get_cell_addr_contents(&Address { sheet: 0, row: 2, col: 2 }).unwrap()
+    );
+    assert!(ws.book.dirty);
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_prefix_ctrl_r_and_fill_right_cmd_fill_count_cells_and_cursor_stays() {
+    let mut ws = sort_workspace(&[&["a", "", "", "", ""]]);
+    script().char('l').run(&mut ws).expect("move");
+    script().char('3').ctrl('r').run(&mut ws).expect("fill");
+    let row = |ws: &Workspace| -> Vec<String> {
+        (1..=5)
+            .map(|c| ws.book.get_cell_addr_contents(&Address { sheet: 0, row: 1, col: c }).unwrap())
+            .collect()
+    };
+    assert_eq!(row(&ws), vec!["a", "a", "a", "a", ""]);
+    assert_eq!(2, ws.book.location.col);
+    assert!(ws.book.undo().expect("undo"));
+    assert_eq!(row(&ws), vec!["a", "", "", "", ""]);
+    run_command(&mut ws, "fill-right 2");
+    assert_eq!(row(&ws), vec!["a", "a", "a", "", ""]);
+}
+
+#[test]
+fn test_fill_right_on_column_a_is_a_dialog_and_changes_nothing() {
+    let mut ws = sort_workspace(&[&["a"]]);
+    ws.book.dirty = false;
+    script().ctrl('r').run(&mut ws).expect("fill");
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+    assert!(!ws.book.dirty);
+}
+
+#[test]
+fn test_alt_r_enters_range_select_and_ctrl_r_does_not() {
+    let mut ws = new_workspace();
+    script().alt('r').run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
+    let mut ws = new_workspace();
+    script().ctrl('r').run(&mut ws).expect("run");
+    assert_ne!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
 }

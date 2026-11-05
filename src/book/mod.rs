@@ -638,6 +638,37 @@ impl Book {
         Ok(())
     }
 
+    /// Copy fill right (L4): the mirror of `fill_down`. Copy the cell left
+    /// of the cursor over the cursor cell and the `count - 1` cells to its
+    /// right. One undo step. Nothing changes on any error (L9).
+    pub fn fill_right(&mut self, count: usize) -> Result<()> {
+        let Address { sheet, row, col } = self.location.clone();
+        if count == 0 {
+            return Err(anyhow!("Unable to fill right: count must be at least 1"));
+        }
+        if col <= 1 {
+            return Err(anyhow!("Unable to fill right: there is no cell to the left to copy"));
+        }
+        let to_col = col + count - 1;
+        if to_col > LAST_COLUMN as usize {
+            return Err(anyhow!("Unable to fill right: the sheet ends at column {LAST_COLUMN}"));
+        }
+        let source = Area {
+            sheet,
+            row: row as i32,
+            column: col as i32 - 1,
+            width: 1,
+            height: 1,
+        };
+        self.as_action(|book| {
+            book.change(|m| m.auto_fill_columns(&source, to_col as i32))
+                .map_err(|e| anyhow!("Unable to fill right: {}", e))
+        })?;
+        self.evaluate();
+        self.dirty = true;
+        Ok(())
+    }
+
     pub fn clear_current_cell(&mut self) -> Result<()> {
         self.dirty = true;
         self.clear_cell_contents(self.location.clone())

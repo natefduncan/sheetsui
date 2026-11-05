@@ -13,6 +13,7 @@ pub enum Cmd<'a> {
     DeleteRows(usize),
     DeleteColumns(usize),
     FillDown(usize),
+    FillRight(usize),
     ColorRows(Option<usize>, String),
     ColorColumns(Option<usize>, String),
     ColorCell(String),
@@ -97,6 +98,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_fill_down(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_fill_right(cursor.clone())? {
         return Ok(Some(cmd));
     }
     // Try consume export
@@ -347,6 +351,28 @@ fn try_consume_fill_down<'cmd, 'i: 'cmd>(
     }
     let arg = input.span(0..).trim();
     Ok(Some(Cmd::FillDown(if arg.is_empty() {
+        1
+    } else if let Ok(count) = arg.parse() {
+        count
+    } else {
+        return Err("You must pass in a whole number for the fill count");
+    })))
+}
+
+fn try_consume_fill_right<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "fill-right";
+
+    if !compare(input.clone(), LONG) {
+        return Ok(None);
+    }
+    input.seek(LONG.len());
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err("Invalid command: Did you mean to type `fill-right <count>`?");
+    }
+    let arg = input.span(0..).trim();
+    Ok(Some(Cmd::FillRight(if arg.is_empty() {
         1
     } else if let Ok(count) = arg.parse() {
         count
