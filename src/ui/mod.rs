@@ -55,6 +55,8 @@ pub enum Modality {
     Command,
     /// The `/` prompt.
     Search,
+    /// The prompt of a `:s` with the `c` flag.
+    Confirm,
     Dialog,
     RangeSelect,
     Quit,
@@ -131,6 +133,18 @@ pub struct Message {
     pub text: String,
 }
 
+/// A `:s///c` session and what the UI needs around it.
+#[derive(Debug)]
+pub struct ConfirmState {
+    pub session: substitute::Confirm,
+    /// The bottom line: `replace with <rep> (y/n/a/q/l)?`.
+    pub prompt: String,
+    /// Where the cursor and the scroll position go back to if nothing
+    /// changes.
+    start: Address,
+    view: ViewportState,
+}
+
 #[derive(Debug)]
 pub struct AppState<'ws> {
     pub modality_stack: Vec<Modality>,
@@ -145,6 +159,8 @@ pub struct AppState<'ws> {
     pub search: SearchState,
     /// The `:set` options, for this session only.
     pub options: Options,
+    /// The `:s///c` session, while its prompt is open.
+    pub confirm: Option<ConfirmState>,
     pub numeric_prefix: Vec<char>,
     /// Keys typed so far that are the start of a longer key sequence.
     pub pending_keys: Vec<Key>,
@@ -174,6 +190,7 @@ impl<'ws> Default for AppState<'ws> {
             search_prompt: Default::default(),
             search: Default::default(),
             options: Default::default(),
+            confirm: None,
             numeric_prefix: Default::default(),
             pending_keys: Default::default(),
             keymap: Default::default(),
@@ -408,6 +425,7 @@ impl<'ws> Workspace<'ws> {
             Modality::CellEdit => self.handle_edit_input(key),
             Modality::Command => self.handle_command_input(key),
             Modality::Search => self.handle_search_input(key),
+            Modality::Confirm => self.handle_confirm_input(key),
             Modality::Dialog => self.handle_dialog_input(key),
             Modality::RangeSelect => self.handle_range_select_input(key),
             Modality::Quit => self.handle_quit_dialog(key),
@@ -569,6 +587,7 @@ impl<'ws> Workspace<'ws> {
             Modality::CellEdit => help::to_widget("edit", &self.state.theme, &self.state.keymap),
             Modality::Command => help::to_widget("command", &self.state.theme, &self.state.keymap),
             Modality::Search => help::to_widget("navigate", &self.state.theme, &self.state.keymap),
+            Modality::Confirm => help::to_widget("command", &self.state.theme, &self.state.keymap),
             Modality::RangeSelect => help::to_widget("visual", &self.state.theme, &self.state.keymap),
             _ => help::to_widget("", &self.state.theme, &self.state.keymap),
         }
@@ -633,6 +652,72 @@ impl<'ws> Workspace<'ws> {
         self.state.search_prompt.handle_key_event(key);
         self.update_preview();
         Ok(None)
+    }
+
+    /// The keys of the `:s///c` prompt. Any other key is ignored.
+    fn handle_confirm_input(&mut self, key: event::KeyEvent) -> Result<Option<ExitCode>> {
+        use substitute::Answer;
+        if key.kind != KeyEventKind::Press {
+            return Ok(None);
+        }
+        let answer = match key.code {
+            KeyCode::Char('y') => Answer::Yes,
+            KeyCode::Char('n') => Answer::No,
+            KeyCode::Char('a') => Answer::All,
+            KeyCode::Char('l') => Answer::Last,
+            KeyCode::Char('q') | KeyCode::Esc => Answer::Quit,
+            _ => return Ok(None),
+        };
+        let Some(state) = self.state.confirm.as_mut() else {
+            self.state.pop_modality();
+            return Ok(None);
+        };
+        match state.session.answer(&mut self.book, answer) {
+            Ok(true) => self.show_confirm_match(),
+            Ok(false) => self.end_confirm(None),
+            Err(e) => self.end_confirm(Some(e.to_string())),
+        }
+        Ok(None)
+    }
+
+    /// Moves the cursor to the match the `c` prompt asks about. The
+    /// viewport follows the cursor, so the cell is on screen.
+    fn show_confirm_match(&mut self) {
+        let Some(at) = self.state.confirm.as_ref().and_then(|c| c.session.current()) else {
+            return;
+        };
+        let at = at.clone();
+        // `move_to` cannot fail; it only sets the row and column.
+        let _ = self.book.move_to(&at);
+        self.handle_movement_change();
+    }
+
+    /// Ends the `c` session: commits its undo step, puts the cursor on the
+    /// last changed cell, or back where it started, and reports the counts
+    /// or `error`.
+    fn end_confirm(&mut self, error: Option<String>) {
+        let Some(state) = self.state.confirm.take() else {
+            return;
+        };
+        if self.state.modality() == &Modality::Confirm {
+            self.state.pop_modality();
+        }
+        let (counts, last) = state.session.finish(&mut self.book);
+        match last {
+            Some(at) => {
+                let _ = self.book.move_to(&at);
+            }
+            None => {
+                self.state.viewport_state = state.view;
+                let _ = self.book.move_to(&state.start);
+            }
+        }
+        self.handle_movement_change();
+        if let Some(error) = error {
+            self.set_message(MessageLevel::Error, error);
+        } else if counts.substitutions > 0 {
+            self.set_message(MessageLevel::Info, counts.message());
+        }
     }
 
     fn handle_quit_dialog(&mut self, key: event::KeyEvent) -> Result<Option<ExitCode>> {
@@ -790,6 +875,11 @@ impl<'ws> Workspace<'ws> {
                 // The current cell may have changed under the cursor.
                 self.handle_movement_change();
                 match result {
+                    Ok(msg) if self.state.confirm.is_some() => {
+                        debug_assert!(msg.is_empty());
+                        self.state.modality_stack.push(Modality::Confirm);
+                        self.show_confirm_match();
+                    }
                     Ok(msg) => self.set_message(MessageLevel::Info, msg),
                     Err(msg) => self.set_message(MessageLevel::Error, msg),
                 }
@@ -1707,6 +1797,11 @@ impl<'ws> Workspace<'ws> {
     /// `hlsearch` is off, after `:noh`, or before any search. While the
     /// `incsearch` preview has a pattern, it is the one highlighted.
     pub(crate) fn highlight_matcher(&mut self) -> Option<(regex::Regex, book::search::SearchIn)> {
+        // The `c` prompt's match is shown whatever `hlsearch` says. `:s`
+        // matches the raw text, so that is what is highlighted.
+        if let Some(confirm) = &self.state.confirm {
+            return Some((confirm.session.matcher().clone(), book::search::SearchIn::Raw));
+        }
         if !self.state.options.hlsearch() {
             return None;
         }
@@ -1724,6 +1819,8 @@ impl<'ws> Workspace<'ws> {
 
     /// Runs `:s` on the cells of `scope`. Returns the message for the user:
     /// the counts, or what went wrong. An empty pattern is the last search's.
+    /// With `c` and a match, it starts a session in `state.confirm` and
+    /// returns an empty message; the caller opens the prompt.
     fn substitute(&mut self, scope: substitute::Scope, text: &str) -> Result<String, String> {
         let command = substitute::parse(text)?;
         let cells = self.substitute_cells(scope)?;
@@ -1739,9 +1836,12 @@ impl<'ws> Workspace<'ws> {
                 None => return Err("E35: No previous regular expression".to_owned()),
             }
         } else {
-            command.pattern
+            command.pattern.clone()
         };
         let matcher = search::compile(&pattern, case)?;
+        if flags.confirm && !flags.count {
+            return self.start_confirm(&cells, matcher, command, &pattern);
+        }
         let counts = if flags.count {
             self.book.count_substitutions(&cells, &matcher, flags.global)
         } else {
@@ -1757,6 +1857,34 @@ impl<'ws> Workspace<'ws> {
         } else {
             counts.message()
         })
+    }
+
+    /// Starts a `:s///c` session on the first match in `cells`.
+    fn start_confirm(
+        &mut self,
+        cells: &[Address],
+        matcher: regex::Regex,
+        command: substitute::Substitute,
+        pattern: &str,
+    ) -> Result<String, String> {
+        let global = command.flags.global;
+        let session =
+            substitute::Confirm::start(&mut self.book, cells, matcher, command.replacement, global)
+                .map_err(|e| e.to_string())?;
+        if session.current().is_none() {
+            let (counts, _) = session.finish(&mut self.book);
+            if !command.flags.quiet {
+                return Err(format!("E486: Pattern not found: {}", pattern));
+            }
+            return Ok(counts.message());
+        }
+        self.state.confirm = Some(ConfirmState {
+            session,
+            prompt: format!("replace with {} (y/n/a/q/l)?", command.typed_replacement),
+            start: self.book.location.clone(),
+            view: self.state.viewport_state.clone(),
+        });
+        Ok(String::new())
     }
 
     /// The cells a `:s` command visits. `'<,'>` is the selection being made

@@ -4299,7 +4299,6 @@ fn test_substitute_errors_go_to_the_message_line() {
     let mut ws = sub_workspace();
     for (command, expected) in [
         ("s/a/b/x", "E488: Unknown flag of :s: x"),
-        ("s/a/b/c", "The c flag of :s is not supported yet"),
         ("s/a/\\n/", "Cannot use \\n or \\r in a replacement: a cell holds one line"),
         ("s/(/b/", ""),
     ] {
@@ -4610,4 +4609,205 @@ fn test_substitute_refreshes_the_current_cell_contents_box() {
     let mut ws = sub_workspace();
     run_command(&mut ws, "%s/a/o/g");
     assert_eq!(ws.text_area.lines().join("\n"), "bonono");
+}
+
+// ---------------------------------------------------------------------------
+// Replace: the c flag
+// ---------------------------------------------------------------------------
+
+fn confirm_prompt(ws: &Workspace) -> Option<String> {
+    ws.state.confirm.as_ref().map(|c| c.prompt.clone())
+}
+
+#[test]
+fn test_confirm_opens_the_prompt_on_the_first_match() {
+    let mut ws = grid_workspace();
+    script().chars("jl").run(&mut ws).expect("run");
+    run_command(&mut ws, "%s/a/b/c");
+    assert_eq!(Some(&Modality::Confirm), ws.state.modality_stack.last());
+    assert_eq!(Some("replace with b (y/n/a/q/l)?".to_owned()), confirm_prompt(&ws));
+    // Row-major from the top of the sheet, not from the cursor.
+    assert_eq!((1, 1), at(&ws));
+    // The match is highlighted with `:s`'s pattern, even with nohlsearch.
+    run_confirm_keys_then(&mut ws, "q");
+    run_command(&mut ws, "set nohlsearch");
+    run_command(&mut ws, "%s/a/b/c");
+    assert_eq!(Some("a".to_owned()), highlighted(&mut ws));
+    run_confirm_keys_then(&mut ws, "q");
+    assert_eq!(None, highlighted(&mut ws));
+}
+
+fn run_confirm_keys_then(ws: &mut Workspace, keys: &str) {
+    script().chars(keys).run(ws).expect("run");
+}
+
+#[test]
+fn test_confirm_y_and_n_walk_the_matches() {
+    let mut ws = grid_workspace();
+    run_command(&mut ws, "%s/a/b/c");
+    script().chars("yn").run(&mut ws).expect("run");
+    assert_eq!((1, 3), at(&ws));
+    assert_eq!(vec!["baa", "aaa", "aaa"], grid_rows(&ws));
+    script().chars("nnny").run(&mut ws).expect("run");
+    assert_eq!((3, 1), at(&ws));
+    assert_eq!(vec!["baa", "aab", "aaa"], grid_rows(&ws));
+    script().chars("nn").run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Confirm), ws.state.modality_stack.last());
+    script().char('n').run(&mut ws).expect("run");
+    // Past the last match the prompt ends on the last changed cell.
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!((2, 3), at(&ws));
+    assert_eq!(Some("2 substitutions on 2 cells".to_owned()), last_message(&ws));
+    assert_eq!(ws.text_area.lines().join("\n"), "b");
+}
+
+#[test]
+fn test_confirm_a_replaces_this_and_the_rest() {
+    let mut ws = grid_workspace();
+    run_command(&mut ws, "%s/a/b/c");
+    script().chars("nnna").run(&mut ws).expect("run");
+    assert_eq!(vec!["aaa", "bbb", "bbb"], grid_rows(&ws));
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!((3, 3), at(&ws));
+    assert_eq!(Some("6 substitutions on 6 cells".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_confirm_l_replaces_this_and_stops() {
+    let mut ws = grid_workspace();
+    run_command(&mut ws, "%s/a/b/c");
+    script().chars("nl").run(&mut ws).expect("run");
+    assert_eq!(vec!["aba", "aaa", "aaa"], grid_rows(&ws));
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!((1, 2), at(&ws));
+}
+
+#[test]
+fn test_confirm_q_and_esc_stop_and_go_back_when_nothing_changed() {
+    for stop in ["q", "esc"] {
+        let mut ws = grid_workspace();
+        script().chars("jjl").run(&mut ws).expect("run");
+        run_command(&mut ws, "%s/a/b/c");
+        let keys = script().chars("nn");
+        let keys = if stop == "q" { keys.char('q') } else { keys.esc() };
+        keys.run(&mut ws).expect("run");
+        assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last(), "{stop}");
+        assert_eq!((3, 2), at(&ws), "{stop}");
+        assert_eq!(vec!["aaa", "aaa", "aaa"], grid_rows(&ws), "{stop}");
+        assert_eq!(None, last_message(&ws), "{stop}");
+        // Nothing changed, so there is no undo step.
+        script().char('u').run(&mut ws).expect("run");
+        assert_eq!((3, 2), at(&ws), "{stop}");
+    }
+}
+
+#[test]
+fn test_confirm_q_after_a_change_goes_to_the_last_change() {
+    let mut ws = grid_workspace();
+    run_command(&mut ws, "%s/a/b/c");
+    script().chars("nynnq").run(&mut ws).expect("run");
+    assert_eq!((1, 2), at(&ws));
+    assert_eq!(vec!["aba", "aaa", "aaa"], grid_rows(&ws));
+}
+
+#[test]
+fn test_confirm_other_keys_are_ignored() {
+    let mut ws = grid_workspace();
+    run_command(&mut ws, "%s/a/b/c");
+    script().chars("xjk:").run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Confirm), ws.state.modality_stack.last());
+    assert_eq!((1, 1), at(&ws));
+    assert_eq!(vec!["aaa", "aaa", "aaa"], grid_rows(&ws));
+}
+
+#[test]
+fn test_confirm_session_is_one_undo_step() {
+    let mut ws = grid_workspace();
+    script().chars("jj").run(&mut ws).expect("run");
+    run_command(&mut ws, "%s/a/b/c");
+    script().chars("nynyyq").run(&mut ws).expect("run");
+    assert_eq!(vec!["aba", "bba", "aaa"], grid_rows(&ws));
+    script().char('u').run(&mut ws).expect("run");
+    assert_eq!(vec!["aaa", "aaa", "aaa"], grid_rows(&ws));
+    // Undo goes to the first changed cell.
+    assert_eq!((1, 2), at(&ws));
+    script().char('r').run(&mut ws).expect("run");
+    assert_eq!(vec!["aba", "bba", "aaa"], grid_rows(&ws));
+}
+
+#[test]
+fn test_confirm_with_g_asks_about_each_match_in_a_cell() {
+    let book = book::Book::from_csv_reader("aaa,a\n".as_bytes(), None).expect("csv");
+    let mut ws = Workspace::new(book, std::path::PathBuf::from("g.sui"));
+    run_command(&mut ws, "%s/a/b/gc");
+    script().chars("yny").run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Confirm), ws.state.modality_stack.last());
+    assert_eq!((1, 2), at(&ws));
+    script().char('n').run(&mut ws).expect("run");
+    assert_eq!(cell_text(&ws, 1, 1), "bab");
+    assert_eq!(cell_text(&ws, 1, 2), "a");
+    assert_eq!(Some("2 substitutions on 1 cell".to_owned()), last_message(&ws));
+    assert_eq!((1, 1), at(&ws));
+}
+
+#[test]
+fn test_confirm_does_not_match_the_replacement_again() {
+    let book = book::Book::from_csv_reader("aa\n".as_bytes(), None).expect("csv");
+    let mut ws = Workspace::new(book, std::path::PathBuf::from("loop.sui"));
+    run_command(&mut ws, "s/a/aa/gc");
+    script().chars("yy").run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!(cell_text(&ws, 1, 1), "aaaa");
+}
+
+#[test]
+fn test_confirm_with_the_selection_scope() {
+    let mut ws = grid_workspace();
+    script().chars("jlvjl:").run(&mut ws).expect("run");
+    script().chars("s/a/b/c").enter().run(&mut ws).expect("run");
+    assert_eq!(Some(&Modality::Confirm), ws.state.modality_stack.last());
+    assert_eq!((2, 2), at(&ws));
+    script().chars("yna").run(&mut ws).expect("run");
+    assert_eq!(vec!["aaa", "aba", "abb"], grid_rows(&ws));
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!((3, 3), at(&ws));
+}
+
+#[test]
+fn test_confirm_with_no_match_is_e486() {
+    let mut ws = grid_workspace();
+    run_command(&mut ws, "%s/z/b/c");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!(Some("E486: Pattern not found: z".to_owned()), last_message(&ws));
+    assert!(ws.state.confirm.is_none());
+    run_command(&mut ws, "%s/z/b/ce");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_confirm_with_n_only_counts() {
+    let mut ws = grid_workspace();
+    run_command(&mut ws, "%s/a/b/cn");
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!(Some("9 matches on 9 cells".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_confirm_prompt_is_drawn_and_scrolls_to_the_match() {
+    use ratatui::{backend::TestBackend, Terminal};
+    let mut book = book::Book::from_csv_reader("x\n".as_bytes(), None).expect("csv");
+    book.update_cell(&Address { sheet: 0, row: 40, col: 1 }, "far").expect("set");
+    book.evaluate();
+    let mut ws = Workspace::new(book, std::path::PathBuf::from("far.sui"));
+    run_command(&mut ws, "%s/far/near/c");
+    assert_eq!((40, 1), at(&ws));
+    let mut term = Terminal::new(TestBackend::new(60, 16)).expect("terminal");
+    term.draw(|f| super::render::draw(f, &mut ws)).expect("draw");
+    let buf = term.backend().buffer().clone();
+    let rows: Vec<String> = (0..buf.area.height)
+        .map(|y| (0..buf.area.width).map(|x| buf[(x, y)].symbol().to_owned()).collect())
+        .collect();
+    assert!(rows.iter().any(|r| r.contains("replace with near (y/n/a/q/l)?")), "{rows:#?}");
+    assert!(rows.iter().any(|r| r.contains("far")), "{rows:#?}");
+    assert!(rows.last().unwrap().contains("confirm"), "{rows:#?}");
 }

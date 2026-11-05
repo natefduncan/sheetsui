@@ -128,8 +128,31 @@ Flags:
 * `n` counts the matches and changes nothing: `3 matches on 2 cells`. Without
   `g` it counts the first match in each cell. It is not an undo step.
 * `e` gives no error when nothing matches.
+* `c` asks before each match. See below.
 
 Flags combine, as in `s/a/b/ge` or `%s/x//gn`. An unknown flag is an error that names it.
+
+### Confirming with `c`
+
+With `c`, `s` stops at each match, in row-major order. The cursor goes to its
+cell, scrolling to it if it is off screen, the match is highlighted, and the
+bottom line says `replace with <replacement> (y/n/a/q/l)?`:
+
+* `y` replaces this match and goes on.
+* `n` skips it.
+* `a` replaces this match and all the rest without asking.
+* `l` replaces this match and stops.
+* `q` or `Esc` stops.
+
+Other keys do nothing. Without `g` only the first match in each cell is asked
+about. With `g` each match in a cell is asked in turn. After a `y` the search
+goes on after the replaced text, so a replacement that contains the pattern,
+as in `s/a/aa/gc`, does not loop.
+
+The whole session is one undo step, however many matches you confirmed. `u`
+reverts all of it. If you confirmed none, there is no step. When it ends the
+cursor is on the last cell that changed, or back where it started if none did.
+`c` works with `%` and `'<,'>` too. With `n`, `c` is ignored: it only counts.
 
 A range in front of `s` replaces in more than the current cell:
 

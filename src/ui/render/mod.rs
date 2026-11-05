@@ -106,6 +106,15 @@ impl<'ws> Workspace<'ws> {
                 buf.set_style(rect, ws.state.theme.get(Slot::Command));
             }));
         }
+        if self.state.modality() == &Modality::Confirm {
+            cs.push(Constraint::Max(1));
+            rs.push(Box::new(|rect: Rect, buf: &mut Buffer, ws: &mut Self| {
+                let prompt = ws.state.confirm.as_ref().map(|c| c.prompt.as_str()).unwrap_or("");
+                Paragraph::new(prompt)
+                    .style(ws.state.theme.get(Slot::Command))
+                    .render(rect, buf);
+            }));
+        }
         let rects: Vec<Rect> = Vec::from(
             Layout::vertical(cs)
                 .vertical_margin(2)
@@ -179,6 +188,7 @@ impl<'widget, 'ws: 'widget> Widget for &'widget mut Workspace<'ws> {
                         Modality::CellEdit => "edit",
                         Modality::Command => "command",
                         Modality::Search => "search",
+                        Modality::Confirm => "confirm",
                         Modality::Dialog => "",
                         Modality::RangeSelect => "range-copy",
                         Modality::Quit => "",
