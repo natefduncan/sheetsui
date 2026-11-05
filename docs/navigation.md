@@ -44,6 +44,8 @@ open a file, and it is not saved when you quit.
 
 {{keys:search}}
 
+For an overview of search and replace, see [Search and Replace](./search.md).
+
 Type `/`, then a pattern, then `Enter`. The cursor goes to the next cell after
 it whose displayed value matches the pattern: left to right across a row, then
 the next row down. `?` does the same backward: right to left, then the row

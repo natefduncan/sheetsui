@@ -55,6 +55,7 @@ get some context sensitive help.
 * [Edit](./edit.md)
 * [Visual](./visual.md)
 * [Command](./command.md)
+* [Search and Replace](./search.md)
 
 ### Customizing
 

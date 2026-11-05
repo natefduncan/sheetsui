@@ -29,6 +29,10 @@ nunmap q
 The next time you start sheetui the mappings are in effect. `Alt-h` shows the
 help with your keys in it, and `:nmap` lists your mappings.
 
+The search keys (`/`, `?`, `n`, `N`, `*`, `#`) are built-in navigation keys like
+the rest, so they can be remapped or turned off with `nunmap`. They are listed
+in the `search` group of the help. See [Search and Replace](./search.md).
+
 ## The keys file
 
 sheetui reads the keys file when it starts, after the theme. It looks in this
