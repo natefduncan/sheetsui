@@ -850,6 +850,7 @@ impl Book {
                 col: self.location.col,
             })?;
         }
+        self.grow_freeze_for_insert(sheet, true, row_idx, count);
         self.dirty = true;
         Ok(())
     }
@@ -871,8 +872,30 @@ impl Book {
                 col: self.location.col + count,
             })?;
         }
+        self.grow_freeze_for_insert(sheet, false, col_idx, count);
         self.dirty = true;
         Ok(())
+    }
+
+    /// Inserting at or above the last frozen row (or column) pushes the
+    /// freeze down with it. Inserting below leaves it alone (F9). The freeze
+    /// lives outside the undo history, so undo does not touch it.
+    fn grow_freeze_for_insert(&mut self, sheet: u32, rows: bool, at: usize, count: usize) {
+        let Some(&(frozen_rows, frozen_cols)) = self.frozen.get(&sheet) else {
+            return;
+        };
+        let (n, max) = if rows {
+            (frozen_rows, LAST_ROW as usize)
+        } else {
+            (frozen_cols, LAST_COLUMN as usize)
+        };
+        if n == 0 || at > n {
+            return;
+        }
+        let grown = (n + count).min(max);
+        self.frozen
+            .insert(sheet, if rows { (grown, frozen_cols) } else { (frozen_rows, grown) });
+        self.freeze_unsaved = true;
     }
 
     /// Get the current sheets dimensions. This is a somewhat expensive calculation.

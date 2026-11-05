@@ -1695,3 +1695,69 @@ fn test_freeze_in_sui_and_csv_is_not_saved() {
     assert_eq!(0, loaded.frozen_rows(0));
     std::fs::remove_file(&path).ok();
 }
+
+fn frozen_book(rows: usize, cols: usize) -> Book {
+    let mut book = Book::new(UserModel::new_empty("one", "en", "America/New_York", "en").unwrap());
+    book.set_frozen(0, rows, cols).unwrap();
+    book.dirty = false;
+    book
+}
+
+#[test]
+fn test_insert_rows_inside_freeze_grows_it() {
+    let mut book = frozen_book(3, 0);
+    book.insert_rows(2, 2).unwrap();
+    assert_eq!(5, book.frozen_rows(0));
+    assert!(book.dirty);
+}
+
+#[test]
+fn test_insert_rows_at_freeze_boundary_and_below() {
+    // Row n is the last frozen row, so it is still inside.
+    let mut book = frozen_book(3, 0);
+    book.insert_rows(3, 1).unwrap();
+    assert_eq!(4, book.frozen_rows(0));
+    // Row n + 1 is the first scrolling row, so it lands below the freeze.
+    let mut book = frozen_book(3, 0);
+    book.insert_rows(4, 1).unwrap();
+    assert_eq!(3, book.frozen_rows(0));
+    let mut book = frozen_book(3, 0);
+    book.insert_rows(10, 2).unwrap();
+    assert_eq!(3, book.frozen_rows(0));
+}
+
+#[test]
+fn test_insert_columns_follow_the_same_rule() {
+    let mut book = frozen_book(0, 3);
+    book.insert_columns(2, 2).unwrap();
+    assert_eq!(5, book.frozen_columns(0));
+    let mut book = frozen_book(0, 3);
+    book.insert_columns(4, 2).unwrap();
+    assert_eq!(3, book.frozen_columns(0));
+}
+
+#[test]
+fn test_insert_with_no_freeze_stays_unfrozen() {
+    let mut book = frozen_book(0, 0);
+    book.insert_rows(1, 2).unwrap();
+    book.insert_columns(1, 2).unwrap();
+    assert_eq!((0, 0), (book.frozen_rows(0), book.frozen_columns(0)));
+}
+
+#[test]
+fn test_undo_insert_does_not_change_freeze() {
+    let mut book = frozen_book(3, 2);
+    book.insert_rows(2, 2).unwrap();
+    book.insert_columns(1, 1).unwrap();
+    assert_eq!((5, 3), (book.frozen_rows(0), book.frozen_columns(0)));
+    book.undo().unwrap();
+    book.undo().unwrap();
+    assert_eq!((5, 3), (book.frozen_rows(0), book.frozen_columns(0)));
+}
+
+#[test]
+fn test_insert_rows_clamps_freeze_to_last_row() {
+    let mut book = frozen_book(LAST_ROW as usize - 1, 0);
+    book.insert_rows(1, 5).unwrap();
+    assert_eq!(LAST_ROW as usize, book.frozen_rows(0));
+}

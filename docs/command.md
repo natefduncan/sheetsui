@@ -29,6 +29,8 @@ The currently supported commands are:
 * `write [path]` save the current spreadsheet. If the path is provided it will save it to that path and update the current file path for subsequent saves. If omitted it will save to the path you are currently editing (or `Untitled.sui` for a new empty workbook). The format is auto-detected from the file extension: `.xlsx` uses Excel format, `.csv` writes the first sheet's displayed values, everything else uses the native `.sui` format. `w` is a shorthand alias for this command.
 * `insert-rows [number]` Inserts a row into the sheet at your current row. If the number is provided then inserts that many rows. If omitted then just inserts one.
 * `insert-cols [number]` Just line `insert-rows` but for columns.
+
+Inserting at or above the last frozen row (or at or left of the last frozen column) grows the freeze by the number inserted, as in Excel. Inserting below or right of the freeze leaves it alone. Undoing an insert does not change the freeze.
 * `freeze` with no arguments pins every row above and every column left of the cursor, counted from row 1 and column A even when the sheet is scrolled. On A1 there is nothing to pin, so nothing changes and a message says so.
 * `freeze <rows> [cols]` pin that many rows (and columns) so they stay visible while the rest scrolls. `freeze 0 0` clears it. The freeze is kept per sheet, is not undoable, and is saved in `.xlsx` files only. A line marks the boundary, styled by the `freeze.line` theme slot.
 * `unfreeze` clear the freeze on the current sheet.
