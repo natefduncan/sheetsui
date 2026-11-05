@@ -873,6 +873,7 @@ impl Book {
         } else if row >= row_idx {
             self.move_to(&Address { row: row_idx, ..self.location.clone() })?;
         }
+        self.shrink_freeze_for_delete(sheet, true, row_idx, count);
         self.dirty = true;
         Ok(())
     }
@@ -895,6 +896,7 @@ impl Book {
         } else if col >= col_idx {
             self.move_to(&Address { col: col_idx, ..self.location.clone() })?;
         }
+        self.shrink_freeze_for_delete(sheet, false, col_idx, count);
         self.dirty = true;
         Ok(())
     }
@@ -919,6 +921,27 @@ impl Book {
         self.grow_freeze_for_insert(sheet, false, col_idx, count);
         self.dirty = true;
         Ok(())
+    }
+
+    /// Deleting rows (or columns) inside the freeze shrinks it by the number
+    /// deleted inside it (R4). The freeze lives outside the undo history, so
+    /// undo does not restore it.
+    fn shrink_freeze_for_delete(&mut self, sheet: u32, rows: bool, at: usize, count: usize) {
+        let Some(&(frozen_rows, frozen_cols)) = self.frozen.get(&sheet) else {
+            return;
+        };
+        let n = if rows { frozen_rows } else { frozen_cols };
+        let shrunk = shrink_freeze(at, count, n);
+        if shrunk == n {
+            return;
+        }
+        let (r, c) = if rows { (shrunk, frozen_cols) } else { (frozen_rows, shrunk) };
+        if (r, c) == (0, 0) {
+            self.frozen.remove(&sheet);
+        } else {
+            self.frozen.insert(sheet, (r, c));
+        }
+        self.freeze_unsaved = true;
     }
 
     /// Inserting at or above the last frozen row (or column) pushes the
@@ -1141,4 +1164,15 @@ impl Default for Book {
         book.clear_history();
         book
     }
+}
+
+/// The new frozen count after deleting `count` rows (or columns) starting at
+/// the 1-based index `first`, when `frozen` were frozen. Only the deleted
+/// part inside the freeze counts.
+pub fn shrink_freeze(first: usize, count: usize, frozen: usize) -> usize {
+    if first > frozen {
+        return frozen;
+    }
+    let inside = (first + count - 1).min(frozen) - first + 1;
+    frozen - inside
 }

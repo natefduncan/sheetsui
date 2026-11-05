@@ -3,6 +3,7 @@ use ironcalc::base::{expressions::types::Area, worksheet::WorksheetDimension, Mo
 use crate::ui::Address;
 
 use super::{
+    shrink_freeze,
     search::{Direction, SearchIn},
     Book, FileFormat, LAST_COLUMN, LAST_ROW,
 };
@@ -1760,6 +1761,61 @@ fn test_insert_rows_clamps_freeze_to_last_row() {
     let mut book = frozen_book(LAST_ROW as usize - 1, 0);
     book.insert_rows(1, 5).unwrap();
     assert_eq!(LAST_ROW as usize, book.frozen_rows(0));
+}
+
+#[test]
+fn test_shrink_freeze_table() {
+    // (first deleted, count, frozen, expected)
+    let table = [
+        (2, 4, 3, 1),  // spanning the boundary
+        (6, 1, 3, 3),  // wholly below
+        (1, 3, 3, 0),  // every frozen row
+        (1, 10, 3, 0), // past the freeze
+        (3, 1, 3, 2),  // last frozen row
+        (4, 1, 3, 3),  // first scrolling row
+        (2, 1, 3, 2),  // inside
+        (1, 1, 0, 0),  // no freeze
+    ];
+    for (first, count, frozen, want) in table {
+        assert_eq!(want, shrink_freeze(first, count, frozen), "{first} {count} {frozen}");
+    }
+}
+
+#[test]
+fn test_delete_rows_shrinks_freeze() {
+    let mut book = frozen_book(3, 0);
+    book.delete_rows(2, 4).unwrap();
+    assert_eq!(1, book.frozen_rows(0));
+    assert!(book.dirty);
+    let mut book = frozen_book(3, 0);
+    book.delete_rows(6, 1).unwrap();
+    assert_eq!(3, book.frozen_rows(0));
+    let mut book = frozen_book(3, 0);
+    book.delete_rows(1, 3).unwrap();
+    assert_eq!(0, book.frozen_rows(0));
+}
+
+#[test]
+fn test_delete_columns_shrinks_freeze() {
+    let mut book = frozen_book(0, 3);
+    book.delete_columns(2, 4).unwrap();
+    assert_eq!(1, book.frozen_columns(0));
+    let mut book = frozen_book(0, 3);
+    book.delete_columns(6, 1).unwrap();
+    assert_eq!(3, book.frozen_columns(0));
+    let mut book = frozen_book(0, 3);
+    book.delete_columns(1, 3).unwrap();
+    assert_eq!(0, book.frozen_columns(0));
+}
+
+#[test]
+fn test_undo_delete_does_not_restore_freeze() {
+    let mut book = frozen_book(3, 3);
+    book.delete_rows(1, 2).unwrap();
+    book.delete_columns(1, 2).unwrap();
+    book.undo().unwrap();
+    book.undo().unwrap();
+    assert_eq!((1, 1), (book.frozen_rows(0), book.frozen_columns(0)));
 }
 
 // -------------------------------------------------------------------------
