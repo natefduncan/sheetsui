@@ -122,6 +122,11 @@ pub struct Book {
     /// Parse warnings produced when loading a `.sui` file with invalid lines.
     /// Empty for xlsx files and for freshly created books.
     pub parse_warnings: Vec<ParseWarning>,
+    /// Frozen (rows, columns) per sheet index. Kept out of the model and the
+    /// undo history until save time. See `planning/freeze-design.md`.
+    frozen: std::collections::HashMap<u32, (usize, usize)>,
+    /// A freeze changed since the last save. Undo must not clear `dirty` then.
+    freeze_unsaved: bool,
     undo: UndoHistory,
 }
 
@@ -136,13 +141,86 @@ impl Book {
             format: FileFormat::Sui,
             file_path: None,
             parse_warnings: Vec::new(),
+            frozen: Default::default(),
+            freeze_unsaved: false,
             undo,
         }
     }
 
     pub fn from_model(model: Model<'static>) -> Self {
         let um: UserModel<'static> = UserModel::from_model(model);
-        Self::new(um)
+        let mut book = Self::new(um);
+        book.read_frozen_from_model();
+        book
+    }
+
+    /// Reads each sheet's freeze from the model, as an xlsx file sets it.
+    fn read_frozen_from_model(&mut self) {
+        let model = self.model.get_model();
+        let count = model.workbook.worksheets.len() as u32;
+        let frozen = (0..count)
+            .filter_map(|sheet| {
+                let rows = model.get_frozen_rows_count(sheet).ok()?.max(0) as usize;
+                let cols = model.get_frozen_columns_count(sheet).ok()?.max(0) as usize;
+                (rows > 0 || cols > 0).then_some((sheet, (rows, cols)))
+            })
+            .collect();
+        self.frozen = frozen;
+    }
+
+    /// The number of frozen rows on `sheet`.
+    pub fn frozen_rows(&self, sheet: u32) -> usize {
+        self.frozen.get(&sheet).map_or(0, |f| f.0)
+    }
+
+    /// The number of frozen columns on `sheet`.
+    pub fn frozen_columns(&self, sheet: u32) -> usize {
+        self.frozen.get(&sheet).map_or(0, |f| f.1)
+    }
+
+    /// Freezes the first `rows` rows and `cols` columns of `sheet`. Zero for
+    /// both clears it. Not undoable, but it marks the book dirty.
+    pub fn set_frozen(&mut self, sheet: u32, rows: usize, cols: usize) -> Result<()> {
+        if sheet as usize >= self.model.get_model().workbook.worksheets.len() {
+            return Err(anyhow!("No such sheet"));
+        }
+        if rows > LAST_ROW as usize {
+            return Err(anyhow!("Cannot freeze {rows} rows, the sheet has {LAST_ROW}"));
+        }
+        if cols > LAST_COLUMN as usize {
+            return Err(anyhow!("Cannot freeze {cols} columns, the sheet has {LAST_COLUMN}"));
+        }
+        if rows == 0 && cols == 0 {
+            self.frozen.remove(&sheet);
+        } else {
+            self.frozen.insert(sheet, (rows, cols));
+        }
+        self.freeze_unsaved = true;
+        self.dirty = true;
+        Ok(())
+    }
+
+    /// Writes the book as xlsx. The freeze is applied to a copy of the model,
+    /// so the live model and its undo history never see it.
+    fn write_xlsx<W: std::io::Write + std::io::Seek>(&self, writer: W) -> Result<()> {
+        let model = self.model.get_model();
+        let count = model.workbook.worksheets.len() as u32;
+        let differs = (0..count).any(|sheet| {
+            let rows = model.get_frozen_rows_count(sheet).unwrap_or(0).max(0) as usize;
+            let cols = model.get_frozen_columns_count(sheet).unwrap_or(0).max(0) as usize;
+            (rows, cols) != (self.frozen_rows(sheet), self.frozen_columns(sheet))
+        });
+        if !differs {
+            return save_xlsx_to_writer(model, writer).map(|_| ()).map_err(|e| anyhow!("{e}"));
+        }
+        let mut copy = Model::from_bytes(&model.to_bytes(), "en").map_err(|e| anyhow!("{e}"))?;
+        for sheet in 0..count {
+            copy.set_frozen_rows(sheet, self.frozen_rows(sheet) as i32)
+                .map_err(|e| anyhow!("{e}"))?;
+            copy.set_frozen_columns(sheet, self.frozen_columns(sheet) as i32)
+                .map_err(|e| anyhow!("{e}"))?;
+        }
+        save_xlsx_to_writer(&copy, writer).map(|_| ()).map_err(|e| anyhow!("{e}"))
     }
 
     /// Construct a new book from an xlsx file.
@@ -303,7 +381,7 @@ impl Book {
                 let file = std::fs::File::create(&path)
                     .map_err(|e| anyhow!("Failed to create xlsx file: {}", e))?;
                 let writer = std::io::BufWriter::new(file);
-                save_xlsx_to_writer(self.model.get_model(), writer)?;
+                self.write_xlsx(writer)?;
             }
             FileFormat::Csv => {
                 let file = std::fs::File::create(&path)
@@ -439,7 +517,7 @@ impl Book {
         let file_path = std::path::Path::new(path);
         let file = std::fs::File::create(file_path)?;
         let writer = std::io::BufWriter::new(file);
-        save_xlsx_to_writer(self.model.get_model(), writer)?;
+        self.write_xlsx(writer)?;
         self.mark_saved();
         Ok(())
     }

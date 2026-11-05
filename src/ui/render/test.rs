@@ -479,3 +479,52 @@ fn test_hlsearch_draws_matches_with_the_search_slots() {
         search_backgrounds(&["/x", "h"])
     );
 }
+
+#[test]
+fn test_viewport_frozen_rows_stay_while_scrolled() {
+    let mut book = Book::from_model(
+        Model::new_empty("test", "en", "America/New_York", "en").expect("Failed to make model"),
+    );
+    book.set_frozen(0, 2, 0).unwrap();
+    let app_state = AppState::default();
+    let at = |row| Address { sheet: 0, row, col: 1 };
+    let viewport = Viewport::new(&book, Some(&app_state.range_select), &app_state.theme)
+        .with_selected(at(500));
+    let rows = viewport.get_visible_rows(8, &ViewportState::default());
+    assert_eq!(vec![1, 2, 496, 497, 498, 499, 500], rows);
+    // Unscrolled, the cursor in the frozen rows shows no row twice.
+    let viewport = Viewport::new(&book, Some(&app_state.range_select), &app_state.theme)
+        .with_selected(at(1));
+    let rows = viewport.get_visible_rows(8, &ViewportState::default());
+    assert_eq!(vec![1, 2, 3, 4, 5, 6, 7], rows);
+}
+
+#[test]
+fn test_viewport_frozen_rows_render_under_the_header() {
+    use ratatui::{backend::TestBackend, Terminal};
+    use ratatui::widgets::StatefulWidget;
+    let mut book = Book::from_model(
+        Model::new_empty("test", "en", "America/New_York", "en").expect("Failed to make model"),
+    );
+    book.set_frozen(0, 1, 0).unwrap();
+    book.update_cell(&Address { sheet: 0, row: 1, col: 1 }, "head").unwrap();
+    book.update_cell(&Address { sheet: 0, row: 50, col: 1 }, "far").unwrap();
+    book.move_to(&Address { sheet: 0, row: 50, col: 1 }).unwrap();
+    book.evaluate();
+    let app_state = AppState::default();
+    let viewport = Viewport::new(&book, Some(&app_state.range_select), &app_state.theme)
+        .with_selected(book.location.clone());
+    let mut term = Terminal::new(TestBackend::new(30, 8)).expect("terminal");
+    term.draw(|f| {
+        let mut state = ViewportState::default();
+        viewport.render(f.area(), f.buffer_mut(), &mut state);
+    })
+    .expect("draw");
+    let buf = term.backend().buffer();
+    let line = |y: u16| (0..30).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>();
+    let all: Vec<String> = (0..8).map(line).collect();
+    assert!(line(1).starts_with("1") && line(1).contains("head"), "{all:#?}");
+    let all: Vec<String> = (0..8).map(line).collect();
+    assert!(line(5).starts_with("50") && line(5).contains("far"), "{all:#?}");
+    assert!(!line(2).starts_with("2 "), "row 2 should be scrolled away: {all:#?}");
+}

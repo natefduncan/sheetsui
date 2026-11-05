@@ -29,6 +29,8 @@ The currently supported commands are:
 * `write [path]` save the current spreadsheet. If the path is provided it will save it to that path and update the current file path for subsequent saves. If omitted it will save to the path you are currently editing (or `Untitled.sui` for a new empty workbook). The format is auto-detected from the file extension: `.xlsx` uses Excel format, `.csv` writes the first sheet's displayed values, everything else uses the native `.sui` format. `w` is a shorthand alias for this command.
 * `insert-rows [number]` Inserts a row into the sheet at your current row. If the number is provided then inserts that many rows. If omitted then just inserts one.
 * `insert-cols [number]` Just line `insert-rows` but for columns.
+* `freeze <rows> [cols]` pin that many rows (and columns) so they stay visible while the rest scrolls. `freeze 0 0` clears it. The freeze is kept per sheet, is not undoable, and is saved in `.xlsx` files only.
+* `unfreeze` clear the freeze on the current sheet.
 * `color-rows [count] <color>` color rows. The count of rows if given specifies how many rows going down to color. 
 * `color-cols [count] <color>` color columns. The count of rows if given specifies how many columns going right to color.
 * `color-cell <color>` Color the currently selected cells.

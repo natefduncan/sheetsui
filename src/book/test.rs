@@ -4,8 +4,9 @@ use crate::ui::Address;
 
 use super::{
     search::{Direction, SearchIn},
-    Book, FileFormat,
+    Book, FileFormat, LAST_COLUMN, LAST_ROW,
 };
+use ironcalc::base::UserModel;
 
 #[test]
 fn test_book_default() {
@@ -1640,4 +1641,57 @@ fn test_model_byte_round_trip_loses_nothing() {
             _ => f64::NAN,
         })
     );
+}
+
+// ---------------------------------------------------------------------------
+// Freeze
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_freeze_xlsx_round_trip_and_live_model_untouched() {
+    let path = std::env::temp_dir().join("sheetui_freeze_round_trip.xlsx");
+    let mut book = Book::new(UserModel::new_empty("one", "en", "America/New_York", "en").unwrap());
+    book.new_sheet(Some("two")).unwrap();
+    book.update_cell(&Address { sheet: 0, row: 2, col: 2 }, "x").unwrap();
+    book.set_frozen(0, 2, 1).unwrap();
+    book.set_frozen(1, 3, 0).unwrap();
+    assert!(book.dirty);
+    book.save_to_xlsx(path.to_str().unwrap()).unwrap();
+    assert!(!book.dirty);
+    // The live model was never told.
+    assert_eq!(0, book.model.get_model().get_frozen_rows_count(0).unwrap());
+    let loaded = Book::load(&path, "en", "America/New_York").unwrap();
+    assert_eq!((2, 1), (loaded.frozen_rows(0), loaded.frozen_columns(0)));
+    assert_eq!((3, 0), (loaded.frozen_rows(1), loaded.frozen_columns(1)));
+    assert_eq!("x", loaded.get_cell_addr_contents(&Address { sheet: 0, row: 2, col: 2 }).unwrap());
+    // Unfreezing is saved too.
+    let mut loaded = loaded;
+    loaded.set_frozen(0, 0, 0).unwrap();
+    loaded.save().unwrap();
+    let again = Book::load(&path, "en", "America/New_York").unwrap();
+    assert_eq!(0, again.frozen_rows(0));
+    assert_eq!(3, again.frozen_rows(1));
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn test_set_frozen_rejects_out_of_range() {
+    let mut book = Book::new(UserModel::new_empty("one", "en", "America/New_York", "en").unwrap());
+    assert!(book.set_frozen(0, LAST_ROW as usize + 1, 0).is_err());
+    assert!(book.set_frozen(0, 0, LAST_COLUMN as usize + 1).is_err());
+    assert!(book.set_frozen(5, 1, 0).is_err());
+    assert!(!book.dirty);
+    assert_eq!(0, book.frozen_rows(0));
+}
+
+#[test]
+fn test_freeze_in_sui_and_csv_is_not_saved() {
+    let path = std::env::temp_dir().join("sheetui_freeze_not_saved.sui");
+    let mut book = Book::new(UserModel::new_empty("one", "en", "America/New_York", "en").unwrap());
+    book.set_frozen(0, 2, 0).unwrap();
+    book.save_as(&path).unwrap();
+    assert!(!book.dirty);
+    let loaded = Book::load(&path, "en", "America/New_York").unwrap();
+    assert_eq!(0, loaded.frozen_rows(0));
+    std::fs::remove_file(&path).ok();
 }

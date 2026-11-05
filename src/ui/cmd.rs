@@ -33,6 +33,10 @@ pub enum Cmd<'a> {
     ExportCsv(&'a str),
     SystemPaste,
     Sort { skip: usize, keys: Vec<CmdSortKey> },
+    /// `:freeze <rows> [cols]`: pin that many rows and columns.
+    Freeze { rows: usize, cols: usize },
+    /// `:unfreeze`: clear the freeze.
+    Unfreeze,
     Undo,
     Redo,
     Quit,
@@ -121,6 +125,12 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_sort(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_unfreeze(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_freeze(cursor.clone())? {
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_undo(cursor.clone())? {
@@ -468,6 +478,58 @@ fn try_consume_system_paste<'cmd, 'i: 'cmd>(
         return Err("Invalid command: system-paste does not take an argument");
     }
     Ok(Some(Cmd::SystemPaste))
+}
+
+const FREEZE_USAGE: &str =
+    "Invalid command: usage is `freeze <rows> [cols]`, with whole numbers, or `unfreeze`";
+
+fn try_consume_unfreeze<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "unfreeze";
+
+    if compare(input.clone(), LONG) {
+        input.seek(LONG.len());
+    } else {
+        return Ok(None);
+    }
+    if input.remaining() > 0 {
+        return Err("Invalid command: unfreeze does not take an argument");
+    }
+    Ok(Some(Cmd::Unfreeze))
+}
+
+fn try_consume_freeze<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "freeze";
+
+    if compare(input.clone(), LONG) {
+        input.seek(LONG.len());
+    } else {
+        return Ok(None);
+    }
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err(FREEZE_USAGE);
+    }
+    let mut words = input.span(0..).split_whitespace();
+    // A count is a run of digits, so `-1`, `1.5` and `x` are all errors.
+    let count = |word: Option<&str>| -> Result<Option<usize>, &'static str> {
+        match word {
+            None => Ok(None),
+            Some(w) if w.bytes().all(|b| b.is_ascii_digit()) => w
+                .parse()
+                .map(Some)
+                .map_err(|_| "That is more rows or columns than a sheet has"),
+            Some(_) => Err(FREEZE_USAGE),
+        }
+    };
+    let rows = count(words.next())?.ok_or(FREEZE_USAGE)?;
+    let cols = count(words.next())?.unwrap_or(0);
+    if words.next().is_some() {
+        return Err(FREEZE_USAGE);
+    }
+    Ok(Some(Cmd::Freeze { rows, cols }))
 }
 
 fn try_consume_undo<'cmd, 'i: 'cmd>(

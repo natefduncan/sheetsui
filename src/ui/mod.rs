@@ -928,6 +928,14 @@ impl<'ws> Workspace<'ws> {
                 Ok(None)
             }
             Ok(Some(Cmd::Quit)) => self.quit_app(),
+            Ok(Some(Cmd::Freeze { rows, cols })) => {
+                self.freeze(rows, cols);
+                Ok(None)
+            }
+            Ok(Some(Cmd::Unfreeze)) => {
+                self.freeze(0, 0);
+                Ok(None)
+            }
             Ok(Some(Cmd::Undo)) => {
                 self.undo()?;
                 Ok(None)
@@ -1916,6 +1924,32 @@ impl<'ws> Workspace<'ws> {
         CaseOptions {
             ignorecase: self.state.options.ignorecase(),
             smartcase: self.state.options.smartcase(),
+        }
+    }
+
+    /// Pins `rows` rows and `cols` columns, or clears the freeze for 0 and 0.
+    fn freeze(&mut self, rows: usize, cols: usize) {
+        match self.book.set_frozen(self.book.location.sheet, rows, cols) {
+            Ok(()) if rows == 0 && cols == 0 => {
+                self.set_message(MessageLevel::Info, "Cleared the freeze".to_string())
+            }
+            Ok(()) => {
+                let rows_text = if rows == 0 {
+                    "none".to_string()
+                } else {
+                    format!("1-{rows}")
+                };
+                let cols_text = if cols == 0 {
+                    "none".to_string()
+                } else {
+                    format!("A-{}", number_to_column(cols as i32).unwrap_or_default())
+                };
+                self.set_message(
+                    MessageLevel::Info,
+                    format!("Froze rows {rows_text}, columns {cols_text}"),
+                )
+            }
+            Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
         }
     }
 

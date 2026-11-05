@@ -179,7 +179,7 @@ impl Book {
         self.replay(action.steps, UserModel::undo)?;
         self.go_to_action(&action)?;
         self.undo.undone.push(action);
-        self.dirty = !self.undo.is_at_save_point();
+        self.dirty = !self.undo.is_at_save_point() || self.freeze_unsaved;
         Ok(true)
     }
 
@@ -192,7 +192,7 @@ impl Book {
         self.replay(action.steps, UserModel::redo)?;
         self.go_to_action(&action)?;
         self.undo.done.push(action);
-        self.dirty = !self.undo.is_at_save_point();
+        self.dirty = !self.undo.is_at_save_point() || self.freeze_unsaved;
         Ok(true)
     }
 
@@ -200,6 +200,7 @@ impl Book {
     pub(super) fn mark_saved(&mut self) {
         self.undo.save_point = Some(self.undo.done.len());
         self.dirty = false;
+        self.freeze_unsaved = false;
     }
 
     /// Forget all actions. A book that was just loaded has nothing to undo.

@@ -84,8 +84,15 @@ impl<'ws> Viewport<'ws> {
     pub(crate) fn get_visible_rows(&self, height: u16, state: &ViewportState) -> Vec<usize> {
         // NOTE(jeremy): For now the row default height is 1. We'll have
         // to adjust that if this changes.
+        let frozen = self.book.frozen_rows(self.book.location.sheet);
+        // The frozen rows take screen rows. Keep one row to scroll in.
+        let height = height.saturating_sub(frozen as u16).max(2);
         let mut length = 1;
-        let start_row = std::cmp::min(self.selected.row, state.prev_corner.row);
+        // `prev_corner` is the first scrolling row, never above the freeze.
+        let start_row = std::cmp::max(
+            frozen + 1,
+            std::cmp::min(self.selected.row, state.prev_corner.row),
+        );
         let mut start = start_row;
         let mut end = start_row;
         for row_idx in start_row..=(book::LAST_ROW as usize) {
@@ -100,7 +107,7 @@ impl<'ws> Viewport<'ws> {
                 break;
             }
         }
-        (start..=end).collect()
+        (1..=frozen).chain(start..=end).collect()
     }
 
     pub(crate) fn get_visible_columns(
@@ -163,7 +170,8 @@ impl<'ws> Viewport<'ws> {
         if let Some(vc) = visible_columns.first() {
             state.prev_corner.col = vc.idx
         }
-        if let Some(vr) = visible_rows.first() {
+        let frozen_rows = self.book.frozen_rows(self.book.location.sheet);
+        if let Some(vr) = visible_rows.get(frozen_rows) {
             state.prev_corner.row = *vr;
         }
         let matches = self.visible_matches(&visible_rows, &visible_columns);
@@ -221,14 +229,30 @@ impl<'ws> Viewport<'ws> {
         let Some((matcher, within)) = self.search else {
             return HashSet::new();
         };
-        let (Some(&top), Some(&bottom), Some(left), Some(right)) =
-            (rows.first(), rows.last(), cols.first(), cols.last())
-        else {
+        let (Some(left), Some(right)) = (cols.first(), cols.last()) else {
             return HashSet::new();
         };
-        self.book
-            .matches_in(self.book.location.sheet, matcher, within, top..=bottom, left.idx..=right.idx)
-            .unwrap_or_default()
+        // The rows are runs: the frozen rows, then the scrolling window.
+        // Search each run, never the rows hidden between them.
+        let mut found = HashSet::new();
+        let mut rest = rows;
+        while let Some(&top) = rest.first() {
+            let run = 1 + rest.windows(2).take_while(|w| w[1] == w[0] + 1).count();
+            let bottom = rest[run - 1];
+            found.extend(
+                self.book
+                    .matches_in(
+                        self.book.location.sheet,
+                        matcher,
+                        within,
+                        top..=bottom,
+                        left.idx..=right.idx,
+                    )
+                    .unwrap_or_default(),
+            );
+            rest = &rest[run..];
+        }
+        found
     }
 
     fn compute_cell_style<'widget>(

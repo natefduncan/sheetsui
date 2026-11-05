@@ -4811,3 +4811,86 @@ fn test_confirm_prompt_is_drawn_and_scrolls_to_the_match() {
     assert!(rows.iter().any(|r| r.contains("far")), "{rows:#?}");
     assert!(rows.last().unwrap().contains("confirm"), "{rows:#?}");
 }
+
+// ---------------------------------------------------------------------------
+// Freeze
+// ---------------------------------------------------------------------------
+
+fn cmd_line(ws: &mut Workspace, text: &str) {
+    run(ws, script().char(':').chars(text).enter());
+}
+
+#[test]
+fn test_cmd_freeze_parses_rows_and_optional_columns() {
+    assert_eq!(parse("freeze 1"), Ok(Some(Cmd::Freeze { rows: 1, cols: 0 })));
+    assert_eq!(parse("freeze  2   3"), Ok(Some(Cmd::Freeze { rows: 2, cols: 3 })));
+    assert_eq!(parse("freeze 0 0"), Ok(Some(Cmd::Freeze { rows: 0, cols: 0 })));
+    assert_eq!(parse("unfreeze"), Ok(Some(Cmd::Unfreeze)));
+}
+
+#[test]
+fn test_cmd_freeze_rejects_bad_counts() {
+    for input in [
+        "freeze -1",
+        "freeze 1.5",
+        "freeze x",
+        "freeze 1 x",
+        "freeze 1 2 3",
+        "freeze1",
+        "freeze 99999999999999999999999",
+        "unfreeze 1",
+    ] {
+        assert!(parse(input).is_err(), "{input:?} should be an error");
+    }
+}
+
+#[test]
+fn test_freeze_sets_clears_and_reports() {
+    let mut ws = new_workspace();
+    cmd_line(&mut ws, "freeze 1");
+    assert_eq!(1, ws.book.frozen_rows(0));
+    assert_eq!(Some("Froze rows 1-1, columns none".to_string()), message_text(&ws));
+    cmd_line(&mut ws, "unfreeze");
+    assert_eq!(0, ws.book.frozen_rows(0));
+    cmd_line(&mut ws, "freeze 3");
+    cmd_line(&mut ws, "freeze 0 0");
+    assert_eq!(0, ws.book.frozen_rows(0));
+}
+
+#[test]
+fn test_freeze_errors_leave_the_freeze_alone() {
+    let mut ws = new_workspace();
+    cmd_line(&mut ws, "freeze 2");
+    for bad in ["freeze -1", "freeze 1.5", "freeze x", "freeze 2000000"] {
+        cmd_line(&mut ws, bad);
+        run(&mut ws, script().event(crossterm::event::Event::Key(KeyEvent::new(
+            KeyCode::Esc,
+            KeyModifiers::NONE,
+        ))));
+        assert_eq!(2, ws.book.frozen_rows(0), "{bad}");
+    }
+}
+
+#[test]
+fn test_freeze_is_per_sheet() {
+    let mut ws = new_workspace();
+    cmd_line(&mut ws, "new-sheet two");
+    cmd_line(&mut ws, "select-sheet two");
+    cmd_line(&mut ws, "freeze 2");
+    assert_eq!(2, ws.book.frozen_rows(ws.book.location.sheet));
+    assert_eq!(0, ws.book.frozen_rows(0));
+}
+
+#[test]
+fn test_freeze_marks_dirty_and_undo_leaves_it() {
+    let mut ws = new_workspace();
+    run(&mut ws, script().chars("efoo").enter());
+    cmd_line(&mut ws, "freeze 1");
+    assert!(ws.book.dirty);
+    cmd_line(&mut ws, "undo");
+    assert_eq!(cell(&ws, 1, 1), "");
+    assert_eq!(1, ws.book.frozen_rows(0), "undo must not touch the freeze");
+    assert!(ws.book.dirty, "still unsaved");
+    cmd_line(&mut ws, "unfreeze");
+    assert!(ws.book.dirty);
+}
