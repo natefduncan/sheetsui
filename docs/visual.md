@@ -1,7 +1,7 @@
 # Range Select Mode
 
 Range Select mode copies a range reference for use later or delete a range's contents. You can enter range
-select mode from CellEdit mode with `CTRL-r`, or from navigation mode with `Alt-r`.
+select mode from CellEdit mode with `CTRL-r`, or from navigation mode with `Alt-r` (this was `Ctrl-r` before fill took that key).
 
 ## Moving
 
@@ -20,6 +20,8 @@ column. All of each row moves. They work only when you entered range select
 mode from navigation mode. See the `sort` command for more options.
 
 `d` deletes the rows the selection touches and `D` deletes its columns, then the sheet returns to navigation mode. A numeric prefix is ignored. Clearing the selection's contents is `<Del>`. See [Deleting rows and columns](./command.md#deleting-rows-and-columns).
+
+`<C-d>` fills each column of the selection down from its top cell and `<C-r>` fills each row right from its left cell. Range select mode stays active, so `<C-d>` then `<C-r>` fills a block from its top left cell. `x` stamps the start cell instead and does not copy formats. See [Filling](./command.md#filling).
 
 `:` opens the command prompt with `'<,'>`, the range of the selection, in
 it. `:'<,'>s/pattern/replacement/` replaces in the selected cells. See

@@ -31,6 +31,9 @@ The currently supported commands are:
 * `insert-cols [number]` Just line `insert-rows` but for columns.
 * `delete-rows [number]` Deletes the row at your current row and moves the rows below it up. If the number is provided then deletes that many rows, counting down from the cursor row. If omitted then deletes one. In range select mode it deletes every row the selection touches and ignores the number. `dd` does the same in navigation mode.
 * `delete-cols [number]` Just like `delete-rows` but for columns, moving the columns to the right left. `dc` does the same in navigation mode.
+* `fill-down [count]` copies the cell above onto the cursor cell, moving formula references and copying formats. With a count it fills that many cells down from the cursor, all from the cell above the cursor. `<C-d>` does the same in navigation mode. See [Filling](#filling).
+* `fill-right [count]` Just like `fill-down` but copies the cell to the left, to the right. `<C-r>` does the same in navigation mode.
+* `fill-series <up|down|left|right> <count>` takes the selection, or the cursor cell, as seeds and extends it by count cells in that direction, continuing a series. See [Filling](#filling).
 * `freeze` with no arguments pins every row above and every column left of the cursor, counted from row 1 and column A even when the sheet is scrolled. On A1 there is nothing to pin, so nothing changes and a message says so.
 * `freeze <rows> [cols]` pin that many rows (and columns) so they stay visible while the rest scrolls. `freeze 0 0` clears it. The freeze is kept per sheet, is not undoable, and is saved in `.xlsx` files only. A line marks the boundary, styled by the `freeze.line` theme slot.
 * `unfreeze` clear the freeze on the current sheet. The same as `freeze 0 0`.
@@ -67,6 +70,23 @@ Inserting rows at or above the last frozen row (or columns at or left of the las
 * Formulas that point below the deleted rows are rewritten to follow the cells. A reference to a deleted cell becomes `#REF!`.
 * A range reference does not shrink the way it does in Excel. If you delete an end of the range, such as row 1 of `=SUM(A1:A10)`, the formula becomes `=SUM(#REF!:A9)` and shows `#VALUE!`. Deleting row 10 gives `=SUM(A1:#REF!)`. Fix those formulas by hand.
 * Merged cells are not moved by a delete, and they are not moved by an insert either. Check them after you insert or delete rows or columns.
+
+## Filling
+
+`:fill-down` and `:fill-right` (`<C-d>` and `<C-r>`) copy and never make a series. The source is the cell above (down) or to the left (right). A single number, `Item 1` or `Jan` is copied, not continued. Formulas get their references moved, and formats are copied with the values. A fill is one undo step, asks no confirmation, and overwrites what is in the target.
+
+* With no selection, the cursor cell is filled and the cursor does not move. `:fill-down 5` and `5<C-d>` fill the cursor cell and the four below it, all from the cell above the cursor.
+* In range select mode the top row (fill down) or left column (fill right) of the selection is the source, and each column (or row) is filled from its own cell. A count is ignored. A selection one row tall (or one column wide) uses the row above (or the column to the left) as its source. Range select mode stays active, so `<C-d>` then `<C-r>` fills a block from its top left cell. `x` in range select stamps the start cell over the selection and does not copy formats; `<C-d>` then `<C-r>` gives the same values and formulas, with formats copied.
+* With the `'<,'>` prefix that the prompt adds in range select mode, the commands use the selection and ignore the count.
+* Nothing to copy from (row 1 for down, column A for right), a fill past the last row or column, or a fill that cuts through part of an array formula shows a message and changes nothing. Merged cells are not handled.
+
+`:fill-series <direction> <count>` needs both arguments, and a missing or bad one is an error with a usage hint. The seeds are never overwritten. Each seed column (or row) is read for:
+
+* two or more numbers with a constant step: seeds `1, 2` with `:fill-series down 3` give `3, 4, 5`;
+* text ending in a number: `Item 1, Item 2` gives `Item 3, Item 4`;
+* month and day names, keeping their case.
+
+Anything else is copied, and a block of several seeds repeats. A single number seed gives `1, 1, 1`. `up` and `left` exist only for series.
 
 ## Sorting
 
