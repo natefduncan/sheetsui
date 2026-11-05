@@ -10,6 +10,7 @@ pub enum Cmd<'a> {
     Write(Option<&'a str>),
     InsertRows(usize),
     InsertColumns(usize),
+    DeleteRows(usize),
     ColorRows(Option<usize>, String),
     ColorColumns(Option<usize>, String),
     ColorCell(String),
@@ -84,6 +85,10 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
     }
     // try consume insert-col command.
     if let Some(cmd) = try_consume_insert_column(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    // try consume delete-rows command.
+    if let Some(cmd) = try_consume_delete_row(cursor.clone())? {
         return Ok(Some(cmd));
     }
     // Try consume export
@@ -317,6 +322,32 @@ fn try_consume_insert_column<'cmd, 'i: 'cmd>(
         count
     } else {
         return Err("You must pass in a non negative number for the column count");
+    })))
+}
+
+fn try_consume_delete_row<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const SHORT: &str = "dr";
+    const LONG: &str = "delete-rows";
+
+    if compare(input.clone(), LONG) {
+        input.seek(LONG.len());
+    } else if compare(input.clone(), SHORT) {
+        input.seek(SHORT.len());
+    } else {
+        return Ok(None);
+    };
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err("Invalid command: Did you mean to type `delete-rows <arg>`?");
+    }
+    let arg = input.span(0..).trim();
+    Ok(Some(Cmd::DeleteRows(if arg.is_empty() {
+        1
+    } else if let Ok(count) = arg.parse() {
+        count
+    } else {
+        return Err("You must pass in a whole number for the row count");
     })))
 }
 

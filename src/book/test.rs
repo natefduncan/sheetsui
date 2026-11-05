@@ -1761,3 +1761,173 @@ fn test_insert_rows_clamps_freeze_to_last_row() {
     book.insert_rows(1, 5).unwrap();
     assert_eq!(LAST_ROW as usize, book.frozen_rows(0));
 }
+
+// -------------------------------------------------------------------------
+// Delete rows
+
+fn rows_book(n: usize) -> Book {
+    let mut book = Book::default();
+    for r in 1..=n {
+        book.update_cell(&phase2_addr(r, 1), r.to_string()).expect("set");
+    }
+    book.evaluate();
+    book.clear_history();
+    book.dirty = false;
+    book
+}
+
+fn at(book: &mut Book, row: usize, col: usize) {
+    book.move_to(&phase2_addr(row, col)).expect("move");
+}
+
+#[test]
+fn test_delete_rows_shifts_rows_up() {
+    let mut book = rows_book(6);
+    book.delete_rows(2, 1).expect("delete");
+    assert_eq!(column(&book, 1, 1..=5), vec!["1", "3", "4", "5", "6"]);
+    assert!(book.dirty);
+    let mut book = rows_book(6);
+    book.delete_rows(2, 3).expect("delete");
+    assert_eq!(column(&book, 1, 1..=3), vec!["1", "5", "6"]);
+}
+
+#[test]
+fn test_delete_rows_cursor_rules() {
+    // In the deleted rows: stays at the first one.
+    let mut book = rows_book(6);
+    at(&mut book, 3, 1);
+    book.delete_rows(2, 3).expect("delete");
+    assert_eq!(book.location, phase2_addr(2, 1));
+    // Above the deleted rows: untouched.
+    let mut book = rows_book(6);
+    at(&mut book, 1, 1);
+    book.delete_rows(2, 3).expect("delete");
+    assert_eq!(book.location, phase2_addr(1, 1));
+    // Below: moves up so it points at the same data.
+    let mut book = rows_book(10);
+    at(&mut book, 10, 1);
+    book.delete_rows(3, 4).expect("delete");
+    assert_eq!(book.location, phase2_addr(6, 1));
+    assert_eq!("10", book.get_current_cell_rendered().unwrap());
+    // Last row with data: same index, now empty.
+    let mut book = rows_book(4);
+    at(&mut book, 4, 1);
+    book.delete_rows(4, 1).expect("delete");
+    assert_eq!(book.location, phase2_addr(4, 1));
+    assert_eq!("", book.get_current_cell_rendered().unwrap());
+}
+
+#[test]
+fn test_delete_rows_is_one_undo_step() {
+    let mut book = rows_book(6);
+    at(&mut book, 3, 1);
+    book.delete_rows(2, 3).expect("delete");
+    assert!(book.undo().expect("undo"));
+    assert_eq!(column(&book, 1, 1..=6), vec!["1", "2", "3", "4", "5", "6"]);
+    assert_eq!(book.location, phase2_addr(3, 1));
+    assert!(!book.dirty, "back at the save point");
+    assert!(!book.undo().expect("nothing before"), "one step only");
+}
+
+#[test]
+fn test_delete_rows_errors_change_nothing() {
+    let mut book = rows_book(3);
+    at(&mut book, 2, 1);
+    assert!(book.delete_rows(2, 0).is_err());
+    assert!(book.delete_rows(1_048_576, 2).is_err());
+    assert!(book.delete_rows(1_048_577, 1).is_err());
+    assert_eq!(column(&book, 1, 1..=3), vec!["1", "2", "3"]);
+    assert_eq!(book.location, phase2_addr(2, 1));
+    assert!(!book.dirty);
+    assert!(!book.undo().expect("undo"), "no undo step");
+}
+
+#[test]
+fn test_delete_rows_partly_overlapping_an_array_formula_is_refused() {
+    let mut book = csv_book("3,\n1,\n2,\n4,\n");
+    book.model.set_user_array_formula(0, 1, 2, 1, 3, "=A1:A3*2").expect("set");
+    book.evaluate();
+    book.clear_history();
+    book.dirty = false;
+    at(&mut book, 3, 1);
+    let before = column(&book, 2, 1..=3);
+    let err = book.delete_rows(2, 1).expect_err("array");
+    assert!(err.to_string().contains("array formula"), "{err}");
+    assert_eq!(column(&book, 2, 1..=3), before);
+    assert_eq!(book.location, phase2_addr(3, 1));
+    assert!(!book.dirty);
+    assert!(!book.undo().expect("undo"));
+}
+
+#[test]
+fn test_delete_rows_wholly_holding_an_array_formula_deletes_it() {
+    let mut book = csv_book("3,\n1,\n2,\n4,\n");
+    book.model.set_user_array_formula(0, 1, 2, 1, 3, "=A1:A3*2").expect("set");
+    book.evaluate();
+    book.delete_rows(1, 3).expect("delete");
+    assert_eq!(column(&book, 1, 1..=1), vec!["4"]);
+    assert_eq!(column(&book, 2, 1..=3), vec!["", "", ""]);
+}
+
+#[test]
+fn test_delete_rows_rewrites_references() {
+    let mut book = rows_book(9);
+    book.update_cell(&phase2_addr(1, 2), "=A5").expect("set");
+    book.update_cell(&phase2_addr(2, 2), "=A9").expect("set");
+    book.evaluate();
+    book.delete_rows(5, 1).expect("delete");
+    book.evaluate();
+    assert_eq!("#REF!", rendered(&book, 1, 2));
+    assert_eq!("=A8", book.get_cell_addr_contents(&phase2_addr(2, 2)).unwrap());
+    assert_eq!("9", rendered(&book, 2, 2));
+}
+
+/// Characterization (not a spec): what ironcalc does to a range when its
+/// first or last row is deleted.
+#[test]
+fn test_delete_rows_characterizes_range_references() {
+    let mut book = rows_book(10);
+    book.update_cell(&phase2_addr(12, 2), "=SUM(A1:A10)").expect("set");
+    book.delete_rows(1, 1).expect("delete first");
+    book.evaluate();
+    let first = book.get_cell_addr_contents(&phase2_addr(11, 2)).unwrap();
+    let first_value = rendered(&book, 11, 2);
+    let mut book = rows_book(10);
+    book.update_cell(&phase2_addr(12, 2), "=SUM(A1:A10)").expect("set");
+    book.delete_rows(10, 1).expect("delete last");
+    book.evaluate();
+    let last = book.get_cell_addr_contents(&phase2_addr(11, 2)).unwrap();
+    let last_value = rendered(&book, 11, 2);
+    println!("first deleted: {first} = {first_value}; last deleted: {last} = {last_value}");
+    // Unlike Excel, which shrinks the range, ironcalc breaks it.
+    assert_eq!(("=SUM(#REF!:A9)", "#VALUE!"), (first.as_str(), first_value.as_str()));
+    assert_eq!(("=SUM(A1:#REF!)", "#VALUE!"), (last.as_str(), last_value.as_str()));
+}
+
+/// ironcalc does not move merged ranges on delete (R8, known limitation).
+#[test]
+fn test_delete_rows_does_not_move_merged_ranges() {
+    let mut model = Model::new_empty("test", "en", "America/New_York", "en").expect("model");
+    model.workbook.worksheets[0].merge_cells.push("A5:B6".to_string());
+    let mut book = Book::from_model(model);
+    book.update_cell(&phase2_addr(1, 1), "x").expect("set");
+    book.delete_rows(1, 2).expect("delete");
+    let merged = &book.model.get_model().workbook.worksheets[0].merge_cells;
+    assert_eq!(&vec!["A5:B6".to_string()], merged);
+}
+
+#[test]
+fn test_delete_rows_shifts_conditional_format_ranges() {
+    use ironcalc::base::cf_types::{CfRule, ConditionalFormatting};
+    let mut model = Model::new_empty("test", "en", "America/New_York", "en").expect("model");
+    model.workbook.worksheets[0].conditional_formatting.push(ConditionalFormatting {
+        range: "A5:A8".to_string(),
+        cf_rule: CfRule::ColorScale { thresholds: vec![] },
+        priority: 1,
+    });
+    let mut book = Book::from_model(model);
+    book.update_cell(&phase2_addr(1, 1), "x").expect("set");
+    book.delete_rows(1, 2).expect("delete");
+    let cf = &book.model.get_model().workbook.worksheets[0].conditional_formatting;
+    assert_eq!("A3:A6", cf[0].range);
+}

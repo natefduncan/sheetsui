@@ -855,6 +855,28 @@ impl Book {
         Ok(())
     }
 
+    /// Delete `count` rows starting at `row_idx`. One undo step. If ironcalc
+    /// refuses, nothing changes. The cursor follows the rules in
+    /// `planning/delete-design.md` (R5).
+    pub fn delete_rows(&mut self, row_idx: usize, count: usize) -> Result<()> {
+        if count == 0 {
+            return Err(anyhow!("Unable to delete row(s): count must be at least 1"));
+        }
+        let sheet = self.location.sheet;
+        self.as_action(|book| {
+            book.change(|m| m.delete_rows(sheet, row_idx as i32, count as i32))
+                .map_err(|e| anyhow!("Unable to delete row(s): {}", e))
+        })?;
+        let row = self.location.row;
+        if row >= row_idx + count {
+            self.move_to(&Address { row: row - count, ..self.location.clone() })?;
+        } else if row >= row_idx {
+            self.move_to(&Address { row: row_idx, ..self.location.clone() })?;
+        }
+        self.dirty = true;
+        Ok(())
+    }
+
     /// Insert `count` columns at a `col_idx`.
     pub fn insert_columns(&mut self, col_idx: usize, count: usize) -> Result<()> {
         let sheet = self.location.sheet;

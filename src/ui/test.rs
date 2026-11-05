@@ -5013,3 +5013,46 @@ fn test_freeze_clip_saves_the_typed_count() {
     assert_eq!(2, loaded.frozen_columns(0));
     std::fs::remove_dir_all(&dir).ok();
 }
+
+#[test]
+fn test_delete_rows_cmd_forms() {
+    assert_eq!(Cmd::DeleteRows(1), parse("delete-rows").unwrap().unwrap());
+    assert_eq!(Cmd::DeleteRows(3), parse("delete-rows 3").unwrap().unwrap());
+    assert_eq!(Cmd::DeleteRows(2), parse("dr 2").unwrap().unwrap());
+    assert!(parse("delete-rows x").is_err());
+    assert!(parse("delete-rows 1.5").is_err());
+    assert!(parse("delete-rows -1").is_err());
+    assert!(parse("delete-rowsx").is_err());
+}
+
+#[test]
+fn test_delete_rows_command_deletes_from_the_cursor_row() {
+    let mut ws = sort_workspace(&[&["1"], &["2"], &["3"], &["4"]]);
+    script().char('j').run(&mut ws).expect("move");
+    run_command(&mut ws, "delete-rows 2");
+    assert_eq!(sheet_column(&ws, 1, 1..=3), vec!["1", "4", ""]);
+    assert_eq!(2, ws.book.location.row);
+    assert!(ws.book.undo().expect("undo"));
+    assert_eq!(sheet_column(&ws, 1, 1..=4), vec!["1", "2", "3", "4"]);
+}
+
+#[test]
+fn test_delete_rows_command_errors_are_a_dialog_and_change_nothing() {
+    let mut ws = sort_workspace(&[&["1"], &["2"]]);
+    run_command(&mut ws, "delete-rows 0");
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+    assert_eq!(sheet_column(&ws, 1, 1..=2), vec!["1", "2"]);
+    // The last undo step is still the setup edit, not a delete.
+    assert!(ws.book.undo().expect("undo"));
+    assert_eq!(sheet_column(&ws, 1, 1..=2), vec!["1", ""]);
+}
+
+#[test]
+fn test_delete_rows_command_in_range_select_ignores_the_count() {
+    let mut ws = sort_workspace(&[&["1"], &["2"], &["3"], &["4"], &["5"]]);
+    script().char('j').char('v').char('j').run(&mut ws).expect("select");
+    run_command(&mut ws, "delete-rows 9");
+    assert_eq!(sheet_column(&ws, 1, 1..=3), vec!["1", "4", "5"]);
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!(2, ws.book.location.row);
+}
