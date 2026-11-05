@@ -130,6 +130,15 @@ pub struct Book {
     undo: UndoHistory,
 }
 
+/// Which way `Book::fill_series` extends its seeds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FillDirection {
+    Down,
+    Up,
+    Left,
+    Right,
+}
+
 impl Book {
     /// Construct a new book from a Model. Defaults to [`FileFormat::Sui`] with no file path.
     pub fn new(mut model: UserModel<'static>) -> Self {
@@ -645,6 +654,54 @@ impl Book {
         let (left, right) = (start.col.min(end.col), start.col.max(end.col));
         let source_col = if left == right { left.saturating_sub(1) } else { left };
         self.fill_cols(start.sheet, top, bottom, source_col, right)
+    }
+
+    /// Series fill (L6): the area from `start` to `end` (corners in any
+    /// order) are the seeds, extended by `count` rows or columns in
+    /// `direction`. ironcalc detects the series; the seeds are never
+    /// overwritten. One undo step; nothing changes on an error.
+    pub fn fill_series(&mut self, start: &Address, end: &Address, direction: FillDirection, count: usize) -> Result<()> {
+        if count == 0 {
+            return Err(anyhow!("Unable to fill series: count must be at least 1"));
+        }
+        let (top, bottom) = (start.row.min(end.row), start.row.max(end.row));
+        let (left, right) = (start.col.min(end.col), start.col.max(end.col));
+        let source = Area {
+            sheet: start.sheet,
+            row: top as i32,
+            column: left as i32,
+            width: (right - left + 1) as i32,
+            height: (bottom - top + 1) as i32,
+        };
+        let (vertical, target) = match direction {
+            FillDirection::Down => (true, bottom as i64 + count as i64),
+            FillDirection::Up => (true, top as i64 - count as i64),
+            FillDirection::Right => (false, right as i64 + count as i64),
+            FillDirection::Left => (false, left as i64 - count as i64),
+        };
+        let limit = if vertical { LAST_ROW } else { LAST_COLUMN } as i64;
+        if target < 1 || target > limit {
+            let edge = match direction {
+                FillDirection::Down => format!("the sheet ends at row {LAST_ROW}"),
+                FillDirection::Right => format!("the sheet ends at column {LAST_COLUMN}"),
+                FillDirection::Up => "the sheet starts at row 1".to_string(),
+                FillDirection::Left => "the sheet starts at column A".to_string(),
+            };
+            return Err(anyhow!("Unable to fill series: {edge}"));
+        }
+        self.as_action(|book| {
+            book.change(|m| {
+                if vertical {
+                    m.auto_fill_rows(&source, target as i32)
+                } else {
+                    m.auto_fill_columns(&source, target as i32)
+                }
+            })
+            .map_err(|e| anyhow!("Unable to fill series: {}", e))
+        })?;
+        self.evaluate();
+        self.dirty = true;
+        Ok(())
     }
 
     /// Fill the source row `source_row` (columns `left..=right`) down to

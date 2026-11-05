@@ -2187,3 +2187,75 @@ fn test_fill_down_refused_by_ironcalc_adds_no_step_or_dirty() {
     assert!(!book.dirty);
     assert!(!book.undo().expect("no step"));
 }
+
+// -------------------------------------------------------------------------
+// Fill series
+
+fn series(book: &mut Book, from: (usize, usize), to: (usize, usize), dir: crate::book::FillDirection, n: usize) -> anyhow::Result<()> {
+    book.fill_series(&phase2_addr(from.0, from.1), &phase2_addr(to.0, to.1), dir, n)
+}
+
+#[test]
+fn test_fill_series_numbers_down_and_up() {
+    use crate::book::FillDirection::*;
+    let mut book = fill_book(&[(5, 1, "1"), (6, 1, "2")]);
+    series(&mut book, (5, 1), (6, 1), Down, 3).expect("fill");
+    assert_eq!(column(&book, 1, 5..=9), vec!["1", "2", "3", "4", "5"]);
+    assert!(book.dirty);
+    let mut book = fill_book(&[(5, 1, "10"), (6, 1, "8")]);
+    series(&mut book, (5, 1), (6, 1), Down, 2).expect("fill");
+    assert_eq!(column(&book, 1, 5..=8), vec!["10", "8", "6", "4"]);
+    let mut book = fill_book(&[(5, 1, "3"), (6, 1, "4")]);
+    series(&mut book, (5, 1), (6, 1), Up, 2).expect("fill");
+    assert_eq!(column(&book, 1, 3..=6), vec!["1", "2", "3", "4"]);
+}
+
+#[test]
+fn test_fill_series_text_and_names_and_left_right() {
+    use crate::book::FillDirection::*;
+    let mut book = fill_book(&[(1, 1, "Item 1"), (2, 1, "Item 2"), (1, 2, "JAN"), (2, 2, "FEB"), (1, 3, "Jan"), (2, 3, "Feb")]);
+    series(&mut book, (1, 1), (2, 3), Down, 1).expect("fill");
+    assert_eq!("Item 3", book.get_cell_addr_contents(&phase2_addr(3, 1)).unwrap());
+    assert_eq!("MAR", book.get_cell_addr_contents(&phase2_addr(3, 2)).unwrap());
+    assert_eq!("Mar", book.get_cell_addr_contents(&phase2_addr(3, 3)).unwrap());
+    let mut book = fill_book(&[(1, 3, "1"), (1, 4, "2")]);
+    series(&mut book, (1, 3), (1, 4), Right, 2).expect("fill");
+    assert_eq!("4", book.get_cell_addr_contents(&phase2_addr(1, 6)).unwrap());
+    series(&mut book, (1, 3), (1, 4), Left, 2).expect("fill");
+    assert_eq!("0", book.get_cell_addr_contents(&phase2_addr(1, 2)).unwrap());
+    assert_eq!("-1", book.get_cell_addr_contents(&phase2_addr(1, 1)).unwrap());
+}
+
+#[test]
+fn test_fill_series_single_seed_copies_and_blocks_repeat() {
+    use crate::book::FillDirection::*;
+    let mut book = fill_book(&[(1, 1, "1")]);
+    series(&mut book, (1, 1), (1, 1), Down, 3).expect("fill");
+    assert_eq!(column(&book, 1, 1..=4), vec!["1"; 4]);
+    let mut book = fill_book(&[(1, 1, "a"), (2, 1, "x"), (3, 1, "q")]);
+    series(&mut book, (1, 1), (3, 1), Down, 3).expect("fill");
+    assert_eq!(column(&book, 1, 1..=6), vec!["a", "x", "q", "a", "x", "q"]);
+}
+
+#[test]
+fn test_fill_series_formulas_move_and_errors_change_nothing() {
+    use crate::book::FillDirection::*;
+    let mut book = fill_book(&[(1, 1, "1"), (1, 2, "=A1+1")]);
+    series(&mut book, (1, 2), (1, 2), Down, 2).expect("fill");
+    assert_eq!("=A3+1", book.get_cell_addr_contents(&phase2_addr(3, 2)).unwrap());
+    let mut book = fill_book(&[(1, 1, "1")]);
+    assert!(series(&mut book, (1, 1), (1, 1), Up, 1).is_err());
+    assert!(series(&mut book, (1, 1), (1, 1), Left, 1).is_err());
+    assert!(series(&mut book, (1, 1), (1, 1), Down, 2_000_000).is_err());
+    assert!(series(&mut book, (1, 1), (1, 1), Down, 0).is_err());
+    assert!(!book.dirty);
+}
+
+#[test]
+fn test_fill_series_is_one_undo_step() {
+    use crate::book::FillDirection::*;
+    let mut book = fill_book(&[(1, 1, "1"), (2, 1, "2")]);
+    series(&mut book, (1, 1), (2, 1), Down, 3).expect("fill");
+    book.undo().expect("undo");
+    assert_eq!(column(&book, 1, 1..=5), vec!["1", "2", "", "", ""]);
+}

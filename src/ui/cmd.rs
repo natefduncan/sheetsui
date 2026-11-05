@@ -2,6 +2,7 @@
 use ironcalc::base::expressions::utils::{column_to_number, is_valid_column};
 use slice_utils::{Measured, Peekable, Seekable, Span, StrCursor};
 
+use crate::book::FillDirection;
 use crate::book::substitute::{is_delimiter, Scope};
 
 /// A parsed command entered in during command mode.
@@ -14,6 +15,7 @@ pub enum Cmd<'a> {
     DeleteColumns(usize),
     FillDown(usize),
     FillRight(usize),
+    FillSeries(FillDirection, usize),
     ColorRows(Option<usize>, String),
     ColorColumns(Option<usize>, String),
     ColorCell(String),
@@ -101,6 +103,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_fill_right(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_fill_series(cursor.clone())? {
         return Ok(Some(cmd));
     }
     // Try consume export
@@ -379,6 +384,38 @@ fn try_consume_fill_right<'cmd, 'i: 'cmd>(
     } else {
         return Err("You must pass in a whole number for the fill count");
     })))
+}
+
+fn try_consume_fill_series<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "fill-series";
+    const USAGE: &str = "Usage: `fill-series <down|up|left|right> <count>`";
+
+    if !compare(input.clone(), LONG) {
+        return Ok(None);
+    }
+    input.seek(LONG.len());
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err(USAGE);
+    }
+    let arg = input.span(0..).trim();
+    let mut words = arg.split_whitespace();
+    let direction = match words.next() {
+        Some("down") => FillDirection::Down,
+        Some("up") => FillDirection::Up,
+        Some("left") => FillDirection::Left,
+        Some("right") => FillDirection::Right,
+        _ => return Err(USAGE),
+    };
+    let count = match words.next().map(|w| w.parse::<usize>()) {
+        Some(Ok(count)) if count > 0 => count,
+        _ => return Err(USAGE),
+    };
+    if words.next().is_some() {
+        return Err(USAGE);
+    }
+    Ok(Some(Cmd::FillSeries(direction, count)))
 }
 
 fn try_consume_delete_row<'cmd, 'i: 'cmd>(

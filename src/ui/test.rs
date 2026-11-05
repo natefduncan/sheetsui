@@ -5406,3 +5406,31 @@ fn test_x_in_range_select_still_stamps_the_start_cell() {
     assert_eq!(grid(&ws, 2..=3, 2..=3), vec![vec!["5", "5"], vec!["5", "5"]]);
     assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
 }
+
+#[test]
+fn test_fill_series_cmd_forms_and_usage_errors() {
+    use crate::book::FillDirection::*;
+    assert_eq!(Cmd::FillSeries(Down, 3), parse("fill-series down 3").unwrap().unwrap());
+    assert_eq!(Cmd::FillSeries(Up, 1), parse("fill-series up 1").unwrap().unwrap());
+    assert_eq!(Cmd::FillSeries(Left, 2), parse("'<,'>fill-series left 2").unwrap().unwrap());
+    assert_eq!(Cmd::FillSeries(Right, 2), parse("fill-series right 2").unwrap().unwrap());
+    for bad in ["fill-series", "fill-series down", "fill-series sideways 3", "fill-series down x", "fill-series down 0", "fill-series down 2 3", "fill-seriesx"] {
+        let err = parse(bad).expect_err(bad);
+        assert!(err.contains("Usage"), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn test_fill_series_cmd_uses_cursor_or_selection_as_seeds() {
+    let mut ws = sort_workspace(&[&["1", "5"], &["2", "7"], &["", ""], &["", ""], &["", ""]]);
+    script().char('j').run(&mut ws).expect("move");
+    run_command(&mut ws, "fill-series down 1");
+    assert_eq!(grid(&ws, 1..=3, 1..=1), vec![vec!["1"], vec!["2"], vec!["2"]]);
+    let mut ws = sort_workspace(&[&["1", "5"], &["2", "7"], &["", ""], &["", ""], &["", ""]]);
+    script().alt('r').char(' ').chars("jl").run(&mut ws).expect("select");
+    script().char(':').chars("fill-series down 2").enter().run(&mut ws).expect("cmd");
+    assert_eq!(grid(&ws, 3..=4, 1..=2), vec![vec!["3", "9"], vec!["4", "11"]]);
+    let mut ws = sort_workspace(&[&["1", "2"]]);
+    run_command(&mut ws, "fill-series down");
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+}

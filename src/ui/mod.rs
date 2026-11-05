@@ -5,7 +5,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::book::{self, search::Direction, substitute, AddressRange, Book, SortKey};
+use crate::book::{self, search::Direction, substitute, AddressRange, Book, FillDirection, SortKey};
 
 use anyhow::{anyhow, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -912,6 +912,7 @@ impl<'ws> Workspace<'ws> {
             Ok(Some(Cmd::DeleteColumns(count))) => self.delete_cols_or_selection(count),
             Ok(Some(Cmd::FillDown(count))) => self.fill_down(count),
             Ok(Some(Cmd::FillRight(count))) => self.fill_right(count),
+            Ok(Some(Cmd::FillSeries(dir, count))) => self.fill_series(dir, count),
             Ok(Some(Cmd::RenameSheet(idx, name))) => {
                 match idx {
                     Some(idx) => {
@@ -1635,6 +1636,18 @@ impl<'ws> Workspace<'ws> {
             None => self.book.fill_down(count),
         };
         if let Err(e) = result {
+            self.enter_dialog_mode(Markdown::from_str(&e.to_string()));
+        }
+        Ok(None)
+    }
+
+    /// Series fill: the selection (or the cursor cell) are the seeds. The
+    /// mode stays as it is. An error is shown, not fatal.
+    fn fill_series(&mut self, dir: FillDirection, count: usize) -> Result<Option<ExitCode>> {
+        let (a, b) = self
+            .fill_selection()
+            .unwrap_or_else(|| (self.book.location.clone(), self.book.location.clone()));
+        if let Err(e) = self.book.fill_series(&a, &b, dir, count) {
             self.enter_dialog_mode(Markdown::from_str(&e.to_string()));
         }
         Ok(None)
