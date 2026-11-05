@@ -158,6 +158,13 @@ writes each cell's displayed value. A formula is written as its result, not as
 the formula. Cell styles, column widths, and all other sheets are lost. To keep
 them, save to `.sui` or `.xlsx` with `:w <path>`.
 
+## Frozen Rows and Columns
+
+Frozen rows and columns (see `:freeze` in [Command Mode](./command.md)) are
+saved in `.xlsx` files only, and shown again when the file is opened in
+sheetui, Excel, or LibreOffice. `.sui` and `.csv` files do not carry the
+freeze, so it is lost when you save to them.
+
 ## Format Auto-Detection
 
 sheetui determines the format from the file extension (upper or lower case):
@@ -179,4 +186,5 @@ saving with `:w <path>`.
 | Sharing with Excel / LibreOffice | `.xlsx` |
 | Preserving cell styling (within sheetui) | `.sui` |
 | Preserving cell styling (cross-application) | `.xlsx` |
+| Keeping frozen rows and columns | `.xlsx` |
 | Plain data for other tools | `.csv` |

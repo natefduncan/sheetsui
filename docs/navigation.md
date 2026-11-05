@@ -9,6 +9,26 @@ capital letter is the shifted key.
 
 {{keys:cell-navigation}}
 
+## Frozen rows and columns
+
+`:freeze` pins rows and columns so they stay on screen while the rest of the
+sheet scrolls (see [Command Mode](./command.md)). The grid then has up to four
+parts: the pinned corner, the pinned rows, the pinned columns, and the
+scrolling area. A line marks the boundary.
+
+* The cursor moves into frozen cells freely. Moving through them never
+  scrolls the sheet.
+* A jump to a frozen cell (for example `gg`, a search match, or a replace
+  result) does not scroll. A jump to any other cell scrolls the least that
+  shows it.
+* The scrolling area never shows a row or column twice: its first visible row
+  or column is never above or left of the boundary.
+* Range select works across the boundary, and the highlight shows in both
+  areas.
+* If the frozen area is too big for the screen, it is clipped so that one row
+  and one column still scroll, and a message says so. The saved count does not
+  change.
+
 ## Sheet Navigation
 
 {{keys:sheet-navigation}}
