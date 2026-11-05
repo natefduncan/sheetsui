@@ -35,6 +35,8 @@ pub enum Cmd<'a> {
     Sort { skip: usize, keys: Vec<CmdSortKey> },
     /// `:freeze <rows> [cols]`: pin that many rows and columns.
     Freeze { rows: usize, cols: usize },
+    /// `:freeze`: pin every row above and column left of the cursor.
+    FreezeAtCursor,
     /// `:unfreeze`: clear the freeze.
     Unfreeze,
     Undo,
@@ -524,7 +526,9 @@ fn try_consume_freeze<'cmd, 'i: 'cmd>(
             Some(_) => Err(FREEZE_USAGE),
         }
     };
-    let rows = count(words.next())?.ok_or(FREEZE_USAGE)?;
+    let Some(rows) = count(words.next())? else {
+        return Ok(Some(Cmd::FreezeAtCursor));
+    };
     let cols = count(words.next())?.unwrap_or(0);
     if words.next().is_some() {
         return Err(FREEZE_USAGE);

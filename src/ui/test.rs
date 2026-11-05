@@ -4894,3 +4894,60 @@ fn test_freeze_marks_dirty_and_undo_leaves_it() {
     cmd_line(&mut ws, "unfreeze");
     assert!(ws.book.dirty);
 }
+
+#[test]
+fn test_cmd_bare_freeze_parses() {
+    assert_eq!(parse("freeze"), Ok(Some(Cmd::FreezeAtCursor)));
+    assert_eq!(parse("freeze  "), Ok(Some(Cmd::FreezeAtCursor)));
+}
+
+#[test]
+fn test_bare_freeze_pins_above_and_left_of_cursor() {
+    let mut ws = new_workspace();
+    run(&mut ws, script().chars("lljjjj"));
+    cmd_line(&mut ws, "freeze");
+    assert_eq!(4, ws.book.frozen_rows(0));
+    assert_eq!(2, ws.book.frozen_columns(0));
+    assert_eq!(Some("Froze rows 1-4, columns A-B".to_string()), message_text(&ws));
+    assert!(ws.book.dirty);
+}
+
+#[test]
+fn test_bare_freeze_counts_from_origin_when_scrolled() {
+    let mut ws = new_workspace();
+    run(&mut ws, script().chars("lll").chars(&"j".repeat(60)));
+    cmd_line(&mut ws, "freeze");
+    assert_eq!(60, ws.book.frozen_rows(0));
+    assert_eq!(3, ws.book.frozen_columns(0));
+}
+
+#[test]
+fn test_bare_freeze_on_a1_changes_nothing() {
+    let mut ws = new_workspace();
+    cmd_line(&mut ws, "freeze");
+    assert!(!ws.book.dirty);
+    assert_eq!(0, ws.book.frozen_rows(0));
+    assert_eq!(
+        Some("Nothing to freeze above or left of A1".to_string()),
+        message_text(&ws)
+    );
+}
+
+#[test]
+fn test_bare_freeze_on_a1_keeps_an_existing_freeze() {
+    let mut ws = new_workspace();
+    cmd_line(&mut ws, "freeze 2");
+    assert_eq!(2, ws.book.frozen_rows(0));
+    cmd_line(&mut ws, "freeze");
+    assert_eq!(2, ws.book.frozen_rows(0));
+}
+
+#[test]
+fn test_bare_freeze_same_as_existing_is_not_dirty() {
+    let mut ws = new_workspace();
+    run(&mut ws, script().chars("j"));
+    cmd_line(&mut ws, "freeze");
+    ws.book.dirty = false;
+    cmd_line(&mut ws, "freeze");
+    assert!(!ws.book.dirty);
+}

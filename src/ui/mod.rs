@@ -932,6 +932,10 @@ impl<'ws> Workspace<'ws> {
                 self.freeze(rows, cols);
                 Ok(None)
             }
+            Ok(Some(Cmd::FreezeAtCursor)) => {
+                self.freeze_at_cursor();
+                Ok(None)
+            }
             Ok(Some(Cmd::Unfreeze)) => {
                 self.freeze(0, 0);
                 Ok(None)
@@ -1927,28 +1931,54 @@ impl<'ws> Workspace<'ws> {
         }
     }
 
+    /// Pins every row above and column left of the cursor, counted from A1
+    /// whatever the scroll position. On A1 there is nothing to pin.
+    fn freeze_at_cursor(&mut self) {
+        let loc = self.book.location.clone();
+        let rows = loc.row.saturating_sub(1);
+        let cols = loc.col.saturating_sub(1);
+        if rows == 0 && cols == 0 {
+            self.set_message(
+                MessageLevel::Info,
+                "Nothing to freeze above or left of A1".to_string(),
+            );
+            return;
+        }
+        let sheet = loc.sheet;
+        if self.book.frozen_rows(sheet) == rows && self.book.frozen_columns(sheet) == cols {
+            self.set_message(
+                MessageLevel::Info,
+                format!("Already frozen: {}", Self::freeze_text(rows, cols)),
+            );
+            return;
+        }
+        self.freeze(rows, cols);
+    }
+
+    fn freeze_text(rows: usize, cols: usize) -> String {
+        let rows_text = if rows == 0 {
+            "none".to_string()
+        } else {
+            format!("1-{rows}")
+        };
+        let cols_text = if cols == 0 {
+            "none".to_string()
+        } else {
+            format!("A-{}", number_to_column(cols as i32).unwrap_or_default())
+        };
+        format!("rows {rows_text}, columns {cols_text}")
+    }
+
     /// Pins `rows` rows and `cols` columns, or clears the freeze for 0 and 0.
     fn freeze(&mut self, rows: usize, cols: usize) {
         match self.book.set_frozen(self.book.location.sheet, rows, cols) {
             Ok(()) if rows == 0 && cols == 0 => {
                 self.set_message(MessageLevel::Info, "Cleared the freeze".to_string())
             }
-            Ok(()) => {
-                let rows_text = if rows == 0 {
-                    "none".to_string()
-                } else {
-                    format!("1-{rows}")
-                };
-                let cols_text = if cols == 0 {
-                    "none".to_string()
-                } else {
-                    format!("A-{}", number_to_column(cols as i32).unwrap_or_default())
-                };
-                self.set_message(
-                    MessageLevel::Info,
-                    format!("Froze rows {rows_text}, columns {cols_text}"),
-                )
-            }
+            Ok(()) => self.set_message(
+                MessageLevel::Info,
+                format!("Froze {}", Self::freeze_text(rows, cols)),
+            ),
             Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
         }
     }
