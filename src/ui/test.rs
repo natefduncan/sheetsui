@@ -5284,3 +5284,125 @@ fn test_alt_r_enters_range_select_and_ctrl_r_does_not() {
     script().ctrl('r').run(&mut ws).expect("run");
     assert_ne!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
 }
+
+// -------------------------------------------------------------------------
+// Fill a selection
+
+fn grid(ws: &Workspace, rows: std::ops::RangeInclusive<usize>, cols: std::ops::RangeInclusive<usize>) -> Vec<Vec<String>> {
+    rows.map(|row| {
+        cols.clone()
+            .map(|col| ws.book.get_cell_addr_contents(&Address { sheet: 0, row, col }).unwrap())
+            .collect()
+    })
+    .collect()
+}
+
+/// Select B2:D5 in range select mode, started from Navigate.
+fn select_b2_d5(ws: &mut Workspace) {
+    script()
+        .char('j').char('l')
+        .alt('r').char(' ')
+        .chars("jjjll")
+        .run(ws)
+        .expect("select");
+}
+
+fn block_workspace<'a>() -> Workspace<'a> {
+    sort_workspace(&[&["", "", "", ""], &["", "=A2+1", "x", "y"], &["", "", "", ""], &["", "", "", ""], &["", "", "", ""]])
+}
+
+#[test]
+fn test_ctrl_d_in_range_select_fills_each_column_from_its_top_cell() {
+    let mut ws = block_workspace();
+    select_b2_d5(&mut ws);
+    script().ctrl('d').run(&mut ws).expect("fill");
+    assert_eq!(
+        grid(&ws, 2..=5, 2..=4),
+        vec![
+            vec!["=A2+1", "x", "y"],
+            vec!["=A3+1", "x", "y"],
+            vec!["=A4+1", "x", "y"],
+            vec!["=A5+1", "x", "y"],
+        ]
+    );
+    assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
+    assert_eq!(
+        Some((Address { sheet: 0, row: 2, col: 2 }, Address { sheet: 0, row: 5, col: 4 })),
+        ws.state.range_select.get_range()
+    );
+    // One undo step.
+    assert!(ws.book.undo().expect("undo"));
+    assert_eq!(grid(&ws, 3..=5, 2..=4), vec![vec![""; 3]; 3]);
+}
+
+#[test]
+fn test_ctrl_d_then_ctrl_r_and_back_stamp_the_top_left_cell_with_formats() {
+    for order in [['d', 'r'], ['r', 'd']] {
+        let mut ws = sort_workspace(&[&["", ""], &["", "7"]]);
+        let area = ironcalc::base::expressions::types::Area { sheet: 0, row: 2, column: 2, width: 1, height: 1 };
+        ws.book.set_cell_style(&[("font.b", "true")], &area).expect("bold");
+        script().char('j').char('l').alt('r').char(' ').chars("jlll").run(&mut ws).expect("select");
+        for k in order {
+            script().ctrl(k).run(&mut ws).expect("fill");
+        }
+        for row in 2..=3 {
+            for col in 2..=5 {
+                let addr = Address { sheet: 0, row, col };
+                assert_eq!("7", ws.book.get_cell_addr_contents(&addr).unwrap(), "{order:?} {row},{col}");
+                assert_eq!(Some(true), ws.book.get_cell_style(&addr).map(|s| s.font.b));
+            }
+        }
+        assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
+    }
+}
+
+#[test]
+fn test_fill_one_row_or_column_selection_uses_the_neighbour() {
+    let mut ws = sort_workspace(&[&["a", "b"], &["", ""]]);
+    script().char('j').alt('r').char(' ').char('l').run(&mut ws).expect("select");
+    script().ctrl('d').run(&mut ws).expect("fill");
+    assert_eq!(grid(&ws, 2..=2, 1..=2), vec![vec!["a", "b"]]);
+
+    let mut ws = sort_workspace(&[&["a", ""], &["b", ""]]);
+    script().char('l').alt('r').char(' ').char('j').run(&mut ws).expect("select");
+    script().ctrl('r').run(&mut ws).expect("fill");
+    assert_eq!(grid(&ws, 1..=2, 1..=2), vec![vec!["a", "a"], vec!["b", "b"]]);
+}
+
+#[test]
+fn test_range_select_fill_ignores_a_prefix() {
+    let mut ws = block_workspace();
+    select_b2_d5(&mut ws);
+    script().char('2').ctrl('d').run(&mut ws).expect("fill");
+    assert_eq!(sheet_column(&ws, 3, 2..=5), vec!["x"; 4]);
+}
+
+#[test]
+fn test_fill_command_with_selection_prefix_uses_selection_and_ignores_count() {
+    let mut ws = block_workspace();
+    select_b2_d5(&mut ws);
+    // `:` pre-fills `'<,'>`; the count is ignored under a selection.
+    script().char(':').chars("fill-down 1").enter().run(&mut ws).expect("cmd");
+    assert_eq!(sheet_column(&ws, 3, 2..=5), vec!["x"; 4]);
+    assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
+    assert_eq!(Cmd::FillDown(5), parse("'<,'>fill-down 5").unwrap().unwrap());
+}
+
+#[test]
+fn test_range_select_fill_errors_are_a_dialog_and_change_nothing() {
+    let mut ws = sort_workspace(&[&["a"]]);
+    ws.book.dirty = false;
+    script().alt('r').char(' ').run(&mut ws).expect("select");
+    script().ctrl('d').run(&mut ws).expect("fill");
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+    assert!(!ws.book.dirty);
+}
+
+#[test]
+fn test_x_in_range_select_still_stamps_the_start_cell() {
+    let mut ws = sort_workspace(&[&["", "", ""], &["", "5", "9"]]);
+    script().char('j').char('l').alt('r').char(' ').chars("jl").run(&mut ws).expect("select");
+    script().char('x').run(&mut ws).expect("extend");
+    assert_eq!(grid(&ws, 2..=3, 2..=3), vec![vec!["5", "5"], vec!["5", "5"]]);
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}

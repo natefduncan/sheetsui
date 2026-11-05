@@ -1078,6 +1078,14 @@ impl<'ws> Workspace<'ws> {
             RangeHandler::Help => {
                 self.enter_dialog_mode(self.render_help_text());
             }
+            RangeHandler::FillDown => {
+                self.state.reset_n_prefix();
+                return self.fill_down(1);
+            }
+            RangeHandler::FillRight => {
+                self.state.reset_n_prefix();
+                return self.fill_right(1);
+            }
             RangeHandler::DeleteRows => {
                 return self.delete_rows_or_selection(1);
             }
@@ -1595,17 +1603,53 @@ impl<'ws> Workspace<'ws> {
         Ok(())
     }
 
-    /// Copy fill down from the cursor. An error is shown, not fatal.
+    /// The selection to fill, when Range Select was started from Navigate
+    /// and has a start. Range Select started from CellEdit never fills: that
+    /// would change the sheet in the middle of an edit.
+    fn fill_selection(&self) -> Option<(Address, Address)> {
+        let stack = &self.state.modality_stack;
+        if stack.last() == Some(&Modality::RangeSelect)
+            && stack.get(stack.len().wrapping_sub(2)) == Some(&Modality::Navigate)
+        {
+            self.state.range_select.current(&self.book.location)
+        } else {
+            None
+        }
+    }
+
+    fn in_cell_edit_range_select(&self) -> bool {
+        let stack = &self.state.modality_stack;
+        stack.last() == Some(&Modality::RangeSelect)
+            && stack.get(stack.len().wrapping_sub(2)) != Some(&Modality::Navigate)
+    }
+
+    /// Copy fill down: the selection when in Range Select (the mode stays
+    /// active), else from the cursor, `count` cells. An error is shown, not
+    /// fatal.
     fn fill_down(&mut self, count: usize) -> Result<Option<ExitCode>> {
-        if let Err(e) = self.book.fill_down(count) {
+        if self.in_cell_edit_range_select() {
+            return Ok(None);
+        }
+        let result = match self.fill_selection() {
+            Some((a, b)) => self.book.fill_down_area(&a, &b),
+            None => self.book.fill_down(count),
+        };
+        if let Err(e) = result {
             self.enter_dialog_mode(Markdown::from_str(&e.to_string()));
         }
         Ok(None)
     }
 
-    /// Copy fill right from the cursor. An error is shown, not fatal.
+    /// Copy fill right: the mirror of `fill_down`.
     fn fill_right(&mut self, count: usize) -> Result<Option<ExitCode>> {
-        if let Err(e) = self.book.fill_right(count) {
+        if self.in_cell_edit_range_select() {
+            return Ok(None);
+        }
+        let result = match self.fill_selection() {
+            Some((a, b)) => self.book.fill_right_area(&a, &b),
+            None => self.book.fill_right(count),
+        };
+        if let Err(e) = result {
             self.enter_dialog_mode(Markdown::from_str(&e.to_string()));
         }
         Ok(None)
