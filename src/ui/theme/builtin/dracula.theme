@@ -46,3 +46,4 @@ style dialog.border fg purple
 style heading       fg pink    bold true
 style link          fg cyan    underline true
 style hint          fg comment
+style freeze.line   fg pink

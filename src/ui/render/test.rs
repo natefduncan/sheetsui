@@ -491,12 +491,13 @@ fn test_viewport_frozen_rows_stay_while_scrolled() {
     let viewport = Viewport::new(&book, Some(&app_state.range_select), &app_state.theme)
         .with_selected(at(500));
     let rows = viewport.get_visible_rows(8, &ViewportState::default());
-    assert_eq!(vec![1, 2, 496, 497, 498, 499, 500], rows);
+    // Header, two frozen rows and the line leave four rows to scroll.
+    assert_eq!(vec![1, 2, 497, 498, 499, 500], rows);
     // Unscrolled, the cursor in the frozen rows shows no row twice.
     let viewport = Viewport::new(&book, Some(&app_state.range_select), &app_state.theme)
         .with_selected(at(1));
     let rows = viewport.get_visible_rows(8, &ViewportState::default());
-    assert_eq!(vec![1, 2, 3, 4, 5, 6, 7], rows);
+    assert_eq!(vec![1, 2, 3, 4, 5, 6], rows);
 }
 
 #[test]
@@ -591,5 +592,104 @@ fn test_viewport_frozen_columns_render_header_and_corner() {
     assert!(line(0).trim_start().starts_with("A"), "{all:#?}");
     // Corner and pinned column keep showing.
     assert!(line(1).contains("corner") && line(1).contains("head"), "{all:#?}");
-    assert!(line(3).contains("key"), "{all:#?}");
+    assert!(line(4).contains("key"), "{all:#?}");
+}
+
+fn draw_lines(book: &Book, w: u16, h: u16) -> Vec<String> {
+    use ratatui::{backend::TestBackend, Terminal};
+    use ratatui::widgets::StatefulWidget;
+    let app_state = AppState::default();
+    let viewport = Viewport::new(&book, Some(&app_state.range_select), &app_state.theme)
+        .with_selected(book.location.clone());
+    let mut term = Terminal::new(TestBackend::new(w, h)).expect("terminal");
+    term.draw(|f| {
+        let mut state = ViewportState::default();
+        viewport.render(f.area(), f.buffer_mut(), &mut state);
+    })
+    .expect("draw");
+    let buf = term.backend().buffer();
+    (0..h)
+        .map(|y| (0..w).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>())
+        .collect()
+}
+
+#[test]
+fn test_freeze_line_position_and_style() {
+    let mut book = Book::from_model(
+        Model::new_empty("test", "en", "America/New_York", "en").expect("Failed to make model"),
+    );
+    book.set_frozen(0, 2, 1).unwrap();
+    book.evaluate();
+    let lines = draw_lines(&book, 60, 14);
+    // Header, rows 1-2, then the rule, then row 3.
+    assert!(lines[3].starts_with("─────"), "{lines:#?}");
+    assert!(lines[3].contains('┼'), "{lines:#?}");
+    assert!(lines[2].starts_with("2"), "{lines:#?}");
+    assert!(lines[4].starts_with("3"), "{lines:#?}");
+    // The vertical line sits right after the 5 wide row numbers and column A.
+    let col = lines[1].chars().position(|c| c == '│').expect("vertical line");
+    assert_eq!(5 + book.get_col_size(1).unwrap(), col, "{lines:#?}");
+    assert_eq!(Some(col), lines[0].chars().position(|c| c == '│'));
+    assert_eq!(Some(col), lines[3].chars().position(|c| c == '┼'));
+    // Rows only: a rule and no vertical line.
+    book.set_frozen(0, 1, 0).unwrap();
+    let lines = draw_lines(&book, 60, 14);
+    assert!(lines[2].starts_with("─────") && !lines[2].contains('┼'), "{lines:#?}");
+    assert!(lines.iter().all(|l| !l.contains('│')), "{lines:#?}");
+    // Columns only: a vertical line and no rule.
+    book.set_frozen(0, 0, 1).unwrap();
+    let lines = draw_lines(&book, 60, 14);
+    assert!(lines.iter().all(|l| !l.contains('─')), "{lines:#?}");
+    assert!(lines[1].contains('│'), "{lines:#?}");
+}
+
+#[test]
+fn test_no_freeze_draws_no_line_and_takes_no_space() {
+    let mut book = Book::from_model(
+        Model::new_empty("test", "en", "America/New_York", "en").expect("Failed to make model"),
+    );
+    book.evaluate();
+    let lines = draw_lines(&book, 60, 14);
+    assert!(lines.iter().all(|l| !l.contains('─') && !l.contains('│')), "{lines:#?}");
+    assert!(lines[1].starts_with("1") && lines[2].starts_with("2"), "{lines:#?}");
+}
+
+#[test]
+fn test_freeze_line_uses_the_theme_slot() {
+    use crate::ui::theme::Slot;
+    use ratatui::style::{Color, Style};
+    use ratatui::{backend::TestBackend, Terminal};
+    use ratatui::widgets::StatefulWidget;
+    let mut book = Book::from_model(
+        Model::new_empty("test", "en", "America/New_York", "en").expect("Failed to make model"),
+    );
+    book.set_frozen(0, 1, 0).unwrap();
+    book.evaluate();
+    let mut theme = crate::ui::theme::Theme::default();
+    let (t, w) = crate::ui::theme::parse("style freeze.line fg #123456", &theme);
+    assert!(w.is_empty());
+    theme = t;
+    assert_ne!(Style::default(), theme.get(Slot::FreezeLine));
+    let app_state = AppState::default();
+    let viewport = Viewport::new(&book, Some(&app_state.range_select), &theme)
+        .with_selected(book.location.clone());
+    let mut term = Terminal::new(TestBackend::new(40, 10)).expect("terminal");
+    term.draw(|f| {
+        let mut state = ViewportState::default();
+        viewport.render(f.area(), f.buffer_mut(), &mut state);
+    })
+    .expect("draw");
+    assert_eq!(Some(Color::Rgb(0x12, 0x34, 0x56)), term.backend().buffer()[(8, 2)].style().fg);
+}
+
+#[test]
+fn test_builtin_themes_define_the_freeze_line() {
+    use crate::ui::theme::Slot;
+    use ratatui::style::Style;
+    assert_eq!(5, crate::ui::theme::lookup::BUILTIN.len());
+    for (name, _) in crate::ui::theme::lookup::BUILTIN {
+        let (theme, warnings) = crate::ui::theme::lookup::load(name, None).unwrap();
+        assert!(warnings.is_empty(), "{name}");
+        assert_ne!(Style::default(), theme.get(Slot::FreezeLine), "{name}");
+    }
 }

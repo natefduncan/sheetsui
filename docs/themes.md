@@ -89,6 +89,7 @@ Frame:
 * `title`: the file name, the sheet name and dialog titles.
 * `tab`: the sheet tabs.
 * `tab.active`: the current sheet tab.
+* `freeze.line`: the line under frozen rows and right of frozen columns. Drawn only while a freeze is set.
 
 Lines:
 

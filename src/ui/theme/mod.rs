@@ -61,6 +61,7 @@ slots! {
     Search => "search",
     SearchCurrent => "search.current",
     Border => "border",
+    FreezeLine => "freeze.line",
     Title => "title",
     Tab => "tab",
     TabActive => "tab.active",

@@ -89,8 +89,9 @@ impl<'ws> Viewport<'ws> {
         // NOTE(jeremy): For now the row default height is 1. We'll have
         // to adjust that if this changes.
         let frozen = self.clipped_frozen_rows(height);
-        // The frozen rows take screen rows. Keep one row to scroll in.
-        let height = height.saturating_sub(frozen as u16).max(2);
+        // The frozen rows take screen rows, and so does the line under them.
+        let line = (frozen > 0) as u16;
+        let height = height.saturating_sub(frozen as u16 + line).max(2);
         let mut length = 1;
         // `prev_corner` is the first scrolling row, never above the freeze.
         let start_row = std::cmp::max(
@@ -114,10 +115,12 @@ impl<'ws> Viewport<'ws> {
         (1..=frozen).chain(start..=end).collect()
     }
 
-    /// The frozen rows that fit, leaving the header and one row to scroll.
+    /// The frozen rows that fit, leaving the header, the boundary line and one
+    /// row to scroll.
     fn clipped_frozen_rows(&self, height: u16) -> usize {
         let stored = self.book.frozen_rows(self.book.location.sheet);
-        stored.min(height.saturating_sub(2) as usize)
+        let room = if stored > 0 { 3 } else { 2 };
+        stored.min(height.saturating_sub(room) as usize)
     }
 
     pub(crate) fn get_visible_columns(
@@ -138,7 +141,11 @@ impl<'ws> Viewport<'ws> {
         // We start out with a length of 5 already reserved
         let mut length = 5;
         // Pin the frozen columns, but keep room for one column to scroll in.
+        // The boundary line takes one column while any column is frozen.
         let stored = self.book.frozen_columns(self.book.location.sheet);
+        if stored > 0 {
+            length += 1;
+        }
         let mut frozen = Vec::new();
         for idx in 1..=stored {
             let size = self.book.get_col_size(idx)? as u16;
@@ -150,6 +157,10 @@ impl<'ws> Viewport<'ws> {
             frozen.push(VisibleColumn { idx, length: size });
         }
         let nfrozen = frozen.len();
+        if nfrozen == 0 && stored > 0 {
+            // Clipped away entirely: no line either.
+            length -= 1;
+        }
         let mut visible = Vec::new();
         // `prev_corner` is the first scrolling column, never left of the freeze.
         let start_idx = std::cmp::max(
@@ -215,29 +226,45 @@ impl<'ws> Viewport<'ws> {
             state.prev_corner.row = *vr;
         }
         let matches = self.visible_matches(&visible_rows, &visible_columns);
-        let rows: Vec<Row> =
-            visible_rows
-                .into_iter()
-                .map(|ri| {
-                    let mut cells = vec![Cell::new(Text::from(ri.to_string()))
-                        .style(self.theme.get(Slot::HeaderRow))];
-                    cells.extend(visible_columns.iter().map(
-                        |VisibleColumn { idx: ci, length: _ }| {
-                            let content = self
-                                .book
-                                .get_cell_addr_rendered(&Address {
-                                    row: ri,
-                                    col: *ci,
-                                    sheet: self.book.location.sheet,
-                                })
-                                .unwrap();
-                            let is_match = matches.contains(&(ri, *ci));
-                            self.compute_cell_style(ri, *ci, is_match, Cell::new(Text::raw(content)))
-                        },
-                    ));
-                    Row::new(cells)
-                })
-                .collect();
+        let line_style = self.theme.get(Slot::FreezeLine);
+        // The boundary line: a thin column after the frozen columns and a
+        // thin row after the frozen rows. Only drawn while a freeze shows.
+        let vline = |text: &'static str| Cell::new(text).style(line_style);
+        let with_vline = |mut cells: Vec<Cell<'widget>>, glyph: &'static str| {
+            if frozen_cols > 0 {
+                cells.insert(1 + frozen_cols, vline(glyph));
+            }
+            cells
+        };
+        let mut rows: Vec<Row> = Vec::with_capacity(visible_rows.len() + 1);
+        for (pos, ri) in visible_rows.iter().copied().enumerate() {
+            let mut cells = vec![Cell::new(Text::from(ri.to_string()))
+                .style(self.theme.get(Slot::HeaderRow))];
+            cells.extend(visible_columns.iter().map(
+                |VisibleColumn { idx: ci, length: _ }| {
+                    let content = self
+                        .book
+                        .get_cell_addr_rendered(&Address {
+                            row: ri,
+                            col: *ci,
+                            sheet: self.book.location.sheet,
+                        })
+                        .unwrap();
+                    let is_match = matches.contains(&(ri, *ci));
+                    self.compute_cell_style(ri, *ci, is_match, Cell::new(Text::raw(content)))
+                },
+            ));
+            rows.push(Row::new(with_vline(cells, "│")));
+            if frozen_rows > 0 && pos + 1 == frozen_rows {
+                let mut rule = vec![Cell::new("─".repeat(5)).style(line_style)];
+                rule.extend(
+                    visible_columns
+                        .iter()
+                        .map(|c| Cell::new("─".repeat(c.length as usize)).style(line_style)),
+                );
+                rows.push(Row::new(with_vline(rule, "┼")));
+            }
+        }
         let constraints: Vec<Constraint> = visible_columns
             .iter()
             .map(Constraint::from)
@@ -254,8 +281,12 @@ impl<'ws> Viewport<'ws> {
                     Slot::HeaderOdd
                 }))
         }));
+        let header = with_vline(header, "│");
         let mut col_constraints = vec![Constraint::Length(5)];
         col_constraints.extend(constraints);
+        if frozen_cols > 0 {
+            col_constraints.insert(1 + frozen_cols, Constraint::Length(1));
+        }
         Ok(Table::new(rows, col_constraints)
             .header(Row::new(header))
             .column_spacing(0)

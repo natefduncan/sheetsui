@@ -8,3 +8,4 @@ style search       fg terminal  bg terminal  underline true  bold true
 style search.current  fg terminal  bg terminal  reverse true  underline true  bold true
 style dialog       fg terminal  bg terminal
 style heading      fg terminal
+style freeze.line fg terminal  bg terminal  bold true

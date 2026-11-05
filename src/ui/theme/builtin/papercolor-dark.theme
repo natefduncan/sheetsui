@@ -48,3 +48,4 @@ style dialog.border fg blue
 style heading       fg yellow  bold true
 style link          fg aqua    underline true
 style hint          fg comment
+style freeze.line   fg yellow

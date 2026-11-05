@@ -14,3 +14,4 @@ style cell.boolean  fg #7F6000
 style cell.date     fg #351C75
 style cell.negative fg #A61C00
 style cell.error    fg #CC0000  bold true
+style freeze.line   fg #B45F06  bold true

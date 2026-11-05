@@ -9,3 +9,4 @@ style tab.active   reverse true
 style dialog       bg black
 style heading      fg blue
 style link         underline true
+style freeze.line  fg #E6C84F  bg #232136
