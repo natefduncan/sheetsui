@@ -29,6 +29,8 @@ The currently supported commands are:
 * `write [path]` save the current spreadsheet. If the path is provided it will save it to that path and update the current file path for subsequent saves. If omitted it will save to the path you are currently editing (or `Untitled.sui` for a new empty workbook). The format is auto-detected from the file extension: `.xlsx` uses Excel format, `.csv` writes the first sheet's displayed values, everything else uses the native `.sui` format. `w` is a shorthand alias for this command.
 * `insert-rows [number]` Inserts a row into the sheet at your current row. If the number is provided then inserts that many rows. If omitted then just inserts one.
 * `insert-cols [number]` Just line `insert-rows` but for columns.
+* `delete-rows [number]` Deletes the row at your current row and moves the rows below it up. If the number is provided then deletes that many rows, counting down from the cursor row. If omitted then deletes one. In range select mode it deletes every row the selection touches and ignores the number. `dd` does the same in navigation mode.
+* `delete-cols [number]` Just like `delete-rows` but for columns, moving the columns to the right left. `dc` does the same in navigation mode.
 * `freeze` with no arguments pins every row above and every column left of the cursor, counted from row 1 and column A even when the sheet is scrolled. On A1 there is nothing to pin, so nothing changes and a message says so.
 * `freeze <rows> [cols]` pin that many rows (and columns) so they stay visible while the rest scrolls. `freeze 0 0` clears it. The freeze is kept per sheet, is not undoable, and is saved in `.xlsx` files only. A line marks the boundary, styled by the `freeze.line` theme slot.
 * `unfreeze` clear the freeze on the current sheet. The same as `freeze 0 0`.
@@ -55,6 +57,16 @@ The currently supported commands are:
 * `nmap` list your navigation mode mappings and the warnings from loading the keys file. `vmap` lists the range select ones.
 
 Inserting rows at or above the last frozen row (or columns at or left of the last frozen column) grows the freeze by the number inserted. Inserting below or right of the freeze leaves it alone. Undoing an insert does not change the freeze.
+
+## Deleting rows and columns
+
+`:delete-rows` and `:delete-cols` ask for no confirmation. `u` undoes a delete in one step, and puts the cursor back where it was. A count of 0, a count that is not a whole number, or a count past the end of the sheet is an error and changes nothing. So is a delete that cuts through part of an array formula. A delete that covers the whole array formula removes it.
+
+* The cursor stays at the first deleted row (or column). If a range selection deletes rows above the cursor, the cursor moves up by that many so it still points at the same data.
+* Deleting rows at or above the last frozen row (or columns at or left of the last frozen column) shrinks the freeze by the number of deleted rows (or columns) that were inside it. Deleting below or right of the freeze leaves it alone. Undoing a delete does not restore the freeze, the same as for an insert. This rule is sheetui's own and is not claimed to match Excel.
+* Formulas that point below the deleted rows are rewritten to follow the cells. A reference to a deleted cell becomes `#REF!`.
+* A range reference does not shrink the way it does in Excel. If you delete an end of the range, such as row 1 of `=SUM(A1:A10)`, the formula becomes `=SUM(#REF!:A9)` and shows `#VALUE!`. Deleting row 10 gives `=SUM(A1:#REF!)`. Fix those formulas by hand.
+* Merged cells are not moved by a delete, and they are not moved by an insert either. Check them after you insert or delete rows or columns.
 
 ## Sorting
 

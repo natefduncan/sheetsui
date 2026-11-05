@@ -45,6 +45,8 @@ will clear the numeric prefix if you want to cancel it.
 
 {{keys:modify}}
 
+`dd` deletes the row the cursor is on and `dc` the column. A lone `d` waits for the second key. A numeric prefix deletes that many: `3dd`. The `x` and `<Del>` keys clear a cell's contents. See [Deleting rows and columns](./command.md#deleting-rows-and-columns) for the freeze, formula and merged cell notes.
+
 ## Undo and Redo
 
 {{keys:undo}}
@@ -53,7 +55,7 @@ A numeric prefix undoes or redoes that many changes: `3u` undoes three.
 
 Everything that one key or one command changes undoes in one step: a cell
 edit, a paste, a sort, `:insert-rows 5`, or `5 Ctrl-l`. `o` and `O` are two
-steps: the new row, then the edit you type in it. Moving the cursor, selecting,
+steps: the new row, then the edit you type in it. `dd`, `dc` and `3dd` are one step each. Moving the cursor, selecting,
 switching sheets, and saving are not changes.
 
 When you undo back to the point where you last saved, the sheet counts as not

@@ -19,6 +19,8 @@ select mode from CellEdit mode with `CTRL-r`.
 column. All of each row moves. They work only when you entered range select
 mode from navigation mode. See the `sort` command for more options.
 
+`d` deletes the rows the selection touches and `D` deletes its columns, then the sheet returns to navigation mode. A numeric prefix is ignored. Clearing the selection's contents is `<Del>`. See [Deleting rows and columns](./command.md#deleting-rows-and-columns).
+
 `:` opens the command prompt with `'<,'>`, the range of the selection, in
 it. `:'<,'>s/pattern/replacement/` replaces in the selected cells. See
 [Replacing](./command.md#replacing).
