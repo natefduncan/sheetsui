@@ -12,6 +12,7 @@ pub enum Cmd<'a> {
     InsertColumns(usize),
     DeleteRows(usize),
     DeleteColumns(usize),
+    FillDown(usize),
     ColorRows(Option<usize>, String),
     ColorColumns(Option<usize>, String),
     ColorCell(String),
@@ -93,6 +94,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_delete_column(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_fill_down(cursor.clone())? {
         return Ok(Some(cmd));
     }
     // Try consume export
@@ -326,6 +330,28 @@ fn try_consume_insert_column<'cmd, 'i: 'cmd>(
         count
     } else {
         return Err("You must pass in a non negative number for the column count");
+    })))
+}
+
+fn try_consume_fill_down<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "fill-down";
+
+    if !compare(input.clone(), LONG) {
+        return Ok(None);
+    }
+    input.seek(LONG.len());
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err("Invalid command: Did you mean to type `fill-down <count>`?");
+    }
+    let arg = input.span(0..).trim();
+    Ok(Some(Cmd::FillDown(if arg.is_empty() {
+        1
+    } else if let Ok(count) = arg.parse() {
+        count
+    } else {
+        return Err("You must pass in a whole number for the fill count");
     })))
 }
 

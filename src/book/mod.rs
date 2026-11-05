@@ -604,6 +604,40 @@ impl Book {
         })
     }
 
+    /// Copy fill (L4): copy the cell above the cursor over the cursor cell
+    /// and the `count - 1` cells below it, moving formula references and
+    /// copying formats. One undo step. The cursor stays. If there is nothing
+    /// above, the fill runs past the last row or ironcalc refuses, nothing
+    /// changes: no undo step and no dirty flag (L9).
+    pub fn fill_down(&mut self, count: usize) -> Result<()> {
+        let Address { sheet, row, col } = self.location.clone();
+        if count == 0 {
+            return Err(anyhow!("Unable to fill down: count must be at least 1"));
+        }
+        if row <= 1 {
+            return Err(anyhow!("Unable to fill down: there is no cell above to copy"));
+        }
+        let to_row = row + count - 1;
+        if to_row > LAST_ROW as usize {
+            return Err(anyhow!("Unable to fill down: the sheet ends at row {LAST_ROW}"));
+        }
+        // A source one row tall has one seed, so no series is detected.
+        let source = Area {
+            sheet,
+            row: row as i32 - 1,
+            column: col as i32,
+            width: 1,
+            height: 1,
+        };
+        self.as_action(|book| {
+            book.change(|m| m.auto_fill_rows(&source, to_row as i32))
+                .map_err(|e| anyhow!("Unable to fill down: {}", e))
+        })?;
+        self.evaluate();
+        self.dirty = true;
+        Ok(())
+    }
+
     pub fn clear_current_cell(&mut self) -> Result<()> {
         self.dirty = true;
         self.clear_cell_contents(self.location.clone())

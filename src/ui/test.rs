@@ -5180,3 +5180,49 @@ fn test_help_lists_the_delete_keys() {
     assert!(range.contains("`d`: delete the rows the range touches"), "{range}");
     assert!(range.contains("`D`: delete the columns the range touches"), "{range}");
 }
+
+#[test]
+fn test_fill_down_cmd_forms() {
+    assert_eq!(Cmd::FillDown(1), parse("fill-down").unwrap().unwrap());
+    assert_eq!(Cmd::FillDown(5), parse("fill-down 5").unwrap().unwrap());
+    assert!(parse("fill-down x").is_err());
+    assert!(parse("fill-down -1").is_err());
+    assert!(parse("fill-downx").is_err());
+}
+
+#[test]
+fn test_ctrl_d_fills_the_cell_above_down() {
+    let mut ws = sort_workspace(&[&["1", "=A1+1"], &["2"]]);
+    script().char('j').char('l').run(&mut ws).expect("move");
+    script().ctrl('d').run(&mut ws).expect("fill");
+    assert_eq!(
+        "=A2+1",
+        ws.book.get_cell_addr_contents(&Address { sheet: 0, row: 2, col: 2 }).unwrap()
+    );
+    assert!(ws.book.dirty);
+}
+
+#[test]
+fn test_prefix_ctrl_d_and_fill_down_cmd_fill_count_cells_and_cursor_stays() {
+    let mut ws = sort_workspace(&[&["a"], &[""]]);
+    script().char('j').run(&mut ws).expect("move");
+    script().char('3').ctrl('d').run(&mut ws).expect("fill");
+    assert_eq!(sheet_column(&ws, 1, 1..=5), vec!["a", "a", "a", "a", ""]);
+    assert_eq!(2, ws.book.location.row);
+    assert!(ws.book.undo().expect("undo"));
+    assert_eq!(sheet_column(&ws, 1, 1..=4), vec!["a", "", "", ""]);
+
+    run_command(&mut ws, "fill-down 2");
+    assert_eq!(sheet_column(&ws, 1, 1..=4), vec!["a", "a", "a", ""]);
+    run_command(&mut ws, "fill-down");
+    assert_eq!(2, ws.book.location.row);
+}
+
+#[test]
+fn test_fill_down_on_row_one_is_a_dialog_and_changes_nothing() {
+    let mut ws = sort_workspace(&[&["a"]]);
+    ws.book.dirty = false;
+    script().ctrl('d').run(&mut ws).expect("fill");
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+    assert!(!ws.book.dirty);
+}

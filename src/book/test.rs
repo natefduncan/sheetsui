@@ -2091,3 +2091,99 @@ fn test_delete_columns_rewrites_references() {
     assert_eq!("=H1", book.get_cell_addr_contents(&phase2_addr(2, 2)).unwrap());
     assert_eq!("9", rendered(&book, 2, 2));
 }
+
+// -------------------------------------------------------------------------
+// Fill down
+
+fn fill_book(cells: &[(usize, usize, &str)]) -> Book {
+    let mut book = Book::default();
+    for (r, c, v) in cells {
+        book.update_cell(&phase2_addr(*r, *c), v.to_string()).expect("set");
+    }
+    book.evaluate();
+    book.clear_history();
+    book.dirty = false;
+    book
+}
+
+#[test]
+fn test_fill_down_single_seed_copies_and_does_not_continue() {
+    for (seed, expect) in [("5", "5"), ("Item 1", "Item 1"), ("Jan", "Jan")] {
+        let mut book = fill_book(&[(1, 1, seed)]);
+        at(&mut book, 2, 1);
+        book.fill_down(3).expect("fill");
+        assert_eq!(column(&book, 1, 1..=4), vec![expect; 4], "seed {seed}");
+    }
+}
+
+#[test]
+fn test_fill_down_moves_formula_references() {
+    let mut book = fill_book(&[(1, 1, "1"), (2, 1, "2"), (1, 2, "=A1+1")]);
+    at(&mut book, 2, 2);
+    book.fill_down(1).expect("fill");
+    assert_eq!("=A2+1", book.get_cell_addr_contents(&phase2_addr(2, 2)).unwrap());
+    assert_eq!("3", book.get_cell_addr_rendered(&phase2_addr(2, 2)).unwrap());
+}
+
+#[test]
+fn test_fill_down_count_fills_cursor_and_below_and_cursor_stays() {
+    let mut book = fill_book(&[(1, 1, "x"), (4, 1, "keep")]);
+    at(&mut book, 2, 1);
+    book.fill_down(5).expect("fill");
+    assert_eq!(column(&book, 1, 1..=7), vec!["x", "x", "x", "x", "x", "x", ""]);
+    assert_eq!(book.location, phase2_addr(2, 1));
+}
+
+#[test]
+fn test_fill_down_copies_formats_one_undo_step_and_dirty() {
+    let mut book = fill_book(&[(1, 1, "x")]);
+    let area = Area { sheet: 0, row: 1, column: 1, width: 1, height: 1 };
+    book.set_cell_style(&[("font.b", "true")], &area).expect("bold");
+    book.clear_history();
+    book.dirty = false;
+    at(&mut book, 2, 1);
+    book.fill_down(3).expect("fill");
+    assert!(book.dirty);
+    for row in 2..=4 {
+        assert_eq!(Some(true), book.get_cell_style(&phase2_addr(row, 1)).map(|s| s.font.b));
+    }
+    assert!(book.undo().expect("undo"));
+    assert_eq!(column(&book, 1, 1..=4), vec!["x", "", "", ""]);
+    assert_eq!(Some(false), book.get_cell_style(&phase2_addr(3, 1)).map(|s| s.font.b));
+    assert!(!book.undo().expect("nothing more"));
+}
+
+#[test]
+fn test_fill_down_with_nothing_above_changes_nothing() {
+    let mut book = fill_book(&[(1, 1, "x")]);
+    at(&mut book, 1, 1);
+    assert!(book.fill_down(1).is_err());
+    assert!(!book.dirty);
+    assert!(!book.undo().expect("no step"));
+}
+
+#[test]
+fn test_fill_down_past_the_last_row_changes_nothing() {
+    let mut book = fill_book(&[(1, 1, "x")]);
+    at(&mut book, 2, 1);
+    assert!(book.fill_down(1_048_576).is_err());
+    assert!(book.fill_down(0).is_err());
+    assert!(!book.dirty);
+    assert!(!book.undo().expect("no step"));
+    assert_eq!("", book.get_cell_addr_rendered(&phase2_addr(2, 1)).unwrap());
+}
+
+#[test]
+fn test_fill_down_refused_by_ironcalc_adds_no_step_or_dirty() {
+    // A two row array formula in A3:A4; filling A3 only covers part of it.
+    let mut book = fill_book(&[(2, 1, "x"), (3, 2, "1"), (4, 2, "2")]);
+    book.model
+        .set_user_array_formula(0, 3, 1, 1, 2, "=B3:B4")
+        .expect("array");
+    book.clear_history();
+    book.dirty = false;
+    at(&mut book, 3, 1);
+    assert!(book.fill_down(1).is_err());
+    assert!(!book.dirty);
+    assert!(!book.undo().expect("no step"));
+}

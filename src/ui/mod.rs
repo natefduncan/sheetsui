@@ -910,6 +910,7 @@ impl<'ws> Workspace<'ws> {
             }
             Ok(Some(Cmd::DeleteRows(count))) => self.delete_rows_or_selection(count),
             Ok(Some(Cmd::DeleteColumns(count))) => self.delete_cols_or_selection(count),
+            Ok(Some(Cmd::FillDown(count))) => self.fill_down(count),
             Ok(Some(Cmd::RenameSheet(idx, name))) => {
                 match idx {
                     Some(idx) => {
@@ -1390,6 +1391,11 @@ impl<'ws> Workspace<'ws> {
                 self.state.reset_n_prefix();
                 return self.delete_rows_or_selection(count);
             }
+            NavHandler::FillDown => {
+                let count = self.state.get_n_prefix();
+                self.state.reset_n_prefix();
+                return self.fill_down(count);
+            }
             NavHandler::DeleteCols => {
                 let count = self.state.get_n_prefix();
                 self.state.reset_n_prefix();
@@ -1581,6 +1587,14 @@ impl<'ws> Workspace<'ws> {
         }
         self.state.clipboard = None;
         Ok(())
+    }
+
+    /// Copy fill down from the cursor. An error is shown, not fatal.
+    fn fill_down(&mut self, count: usize) -> Result<Option<ExitCode>> {
+        if let Err(e) = self.book.fill_down(count) {
+            self.enter_dialog_mode(Markdown::from_str(&e.to_string()));
+        }
+        Ok(None)
     }
 
     /// Deletes `count` from the cursor, or the selection's when in Range
