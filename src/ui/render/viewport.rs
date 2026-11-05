@@ -115,11 +115,37 @@ impl<'ws> Viewport<'ws> {
         width: u16,
         state: &ViewportState,
     ) -> Result<Vec<VisibleColumn>> {
-        let mut visible = Vec::new();
+        Ok(self.visible_columns_split(width, state)?.1)
+    }
+
+    /// The visible columns, and how many of the leading ones are frozen.
+    fn visible_columns_split(
+        &self,
+        width: u16,
+        state: &ViewportState,
+    ) -> Result<(usize, Vec<VisibleColumn>)> {
         // TODO(zaphar): This should be a shared constant with our first column.
         // We start out with a length of 5 already reserved
         let mut length = 5;
-        let start_idx = std::cmp::min(self.selected.col, state.prev_corner.col);
+        // Pin the frozen columns, but keep room for one column to scroll in.
+        let stored = self.book.frozen_columns(self.book.location.sheet);
+        let mut frozen = Vec::new();
+        for idx in 1..=stored {
+            let size = self.book.get_col_size(idx)? as u16;
+            let next = self.book.get_col_size(idx + 1)? as u16;
+            if length + size + next >= width {
+                break;
+            }
+            length += size;
+            frozen.push(VisibleColumn { idx, length: size });
+        }
+        let nfrozen = frozen.len();
+        let mut visible = Vec::new();
+        // `prev_corner` is the first scrolling column, never left of the freeze.
+        let start_idx = std::cmp::max(
+            nfrozen + 1,
+            std::cmp::min(self.selected.col, state.prev_corner.col),
+        );
         for idx in start_idx..=(book::LAST_COLUMN as usize) {
             let size = self.book.get_col_size(idx)? as u16;
             let updated_length = length + size;
@@ -151,7 +177,8 @@ impl<'ws> Viewport<'ws> {
                 break;
             }
         }
-        Ok(visible)
+        frozen.extend(visible);
+        Ok((nfrozen, frozen))
     }
 
     pub fn block(mut self, block: Block<'ws>) -> Self {
@@ -165,9 +192,9 @@ impl<'ws> Viewport<'ws> {
         height: u16,
         state: &mut ViewportState,
     ) -> Result<Table<'widget>> {
-        let visible_columns = self.get_visible_columns(width, state)?;
+        let (frozen_cols, visible_columns) = self.visible_columns_split(width, state)?;
         let visible_rows = self.get_visible_rows(height, state);
-        if let Some(vc) = visible_columns.first() {
+        if let Some(vc) = visible_columns.get(frozen_cols) {
             state.prev_corner.col = vc.idx
         }
         let frozen_rows = self.book.frozen_rows(self.book.location.sheet);
@@ -202,10 +229,9 @@ impl<'ws> Viewport<'ws> {
             .iter()
             .map(Constraint::from)
             .collect();
-        let end_idx = visible_columns.last().unwrap().idx;
         let mut header = Vec::with_capacity(constraints.len());
         header.push(Cell::new("").style(self.theme.get(Slot::HeaderRow)));
-        header.extend((state.prev_corner.col..=end_idx).map(|i| {
+        header.extend(visible_columns.iter().map(|c| c.idx).map(|i| {
             let count = if i == 26 { 1 } else { (i / 26) + 1 };
             let even = i % 2 == 0;
             Cell::new(Line::raw(COLNAMES[(i - 1) % 26].repeat(count)).centered())

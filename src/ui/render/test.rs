@@ -528,3 +528,68 @@ fn test_viewport_frozen_rows_render_under_the_header() {
     assert!(line(5).starts_with("50") && line(5).contains("far"), "{all:#?}");
     assert!(!line(2).starts_with("2 "), "row 2 should be scrolled away: {all:#?}");
 }
+
+#[test]
+fn test_viewport_frozen_columns_stay_while_scrolled() {
+    let mut book = Book::from_model(
+        Model::new_empty("test", "en", "America/New_York", "en").expect("Failed to make model"),
+    );
+    book.set_frozen(0, 0, 1).unwrap();
+    let app_state = AppState::default();
+    let at = |col| Address { sheet: 0, row: 1, col };
+    let idxs = |col, width| {
+        let viewport = Viewport::new(&book, Some(&app_state.range_select), &app_state.theme)
+            .with_selected(at(col));
+        viewport
+            .get_visible_columns(width, &ViewportState::default())
+            .unwrap()
+            .iter()
+            .map(|c| c.idx)
+            .collect::<Vec<_>>()
+    };
+    let far = idxs(40, 80);
+    assert_eq!(1, far[0], "{far:?}");
+    assert!(far[1] > 20, "{far:?}");
+    assert_eq!(Some(&40), far.last());
+    // Unscrolled, no column shows twice.
+    let near = idxs(1, 80);
+    assert_eq!(&[1, 2, 3], &near[..3]);
+    // A freeze wider than the screen leaves one column to scroll.
+    book.set_frozen(0, 0, 30).unwrap();
+    let viewport = Viewport::new(&book, Some(&app_state.range_select), &app_state.theme)
+        .with_selected(at(35));
+    let clipped = viewport.get_visible_columns(60, &ViewportState::default()).unwrap();
+    assert!(clipped.len() >= 2 && clipped.last().unwrap().idx == 35, "{clipped:?}");
+}
+
+#[test]
+fn test_viewport_frozen_columns_render_header_and_corner() {
+    use ratatui::{backend::TestBackend, Terminal};
+    use ratatui::widgets::StatefulWidget;
+    let mut book = Book::from_model(
+        Model::new_empty("test", "en", "America/New_York", "en").expect("Failed to make model"),
+    );
+    book.set_frozen(0, 2, 1).unwrap();
+    book.update_cell(&Address { sheet: 0, row: 1, col: 1 }, "corner").unwrap();
+    book.update_cell(&Address { sheet: 0, row: 3, col: 1 }, "key").unwrap();
+    book.update_cell(&Address { sheet: 0, row: 1, col: 30 }, "head").unwrap();
+    book.move_to(&Address { sheet: 0, row: 3, col: 30 }).unwrap();
+    book.evaluate();
+    let app_state = AppState::default();
+    let viewport = Viewport::new(&book, Some(&app_state.range_select), &app_state.theme)
+        .with_selected(book.location.clone());
+    let mut term = Terminal::new(TestBackend::new(80, 8)).expect("terminal");
+    term.draw(|f| {
+        let mut state = ViewportState::default();
+        viewport.render(f.area(), f.buffer_mut(), &mut state);
+    })
+    .expect("draw");
+    let buf = term.backend().buffer();
+    let line = |y: u16| (0..80).map(|x| buf[(x, y)].symbol().to_string()).collect::<String>();
+    let all: Vec<String> = (0..8).map(line).collect();
+    // Header: pinned A, then the scrolled-to columns.
+    assert!(line(0).trim_start().starts_with("A"), "{all:#?}");
+    // Corner and pinned column keep showing.
+    assert!(line(1).contains("corner") && line(1).contains("head"), "{all:#?}");
+    assert!(line(3).contains("key"), "{all:#?}");
+}
