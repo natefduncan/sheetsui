@@ -35,6 +35,10 @@ impl<'a> From<&'a VisibleColumn> for Constraint {
 #[derive(Debug, Default, Clone)]
 pub struct ViewportState {
     prev_corner: Address,
+    /// True when the last render shrank the freeze to fit the screen.
+    pub(crate) freeze_clipped: bool,
+    /// True once the clip message was shown, so it is not shown every frame.
+    pub(crate) freeze_clip_reported: bool,
 }
 
 /// A renderable viewport over a book.
@@ -84,7 +88,7 @@ impl<'ws> Viewport<'ws> {
     pub(crate) fn get_visible_rows(&self, height: u16, state: &ViewportState) -> Vec<usize> {
         // NOTE(jeremy): For now the row default height is 1. We'll have
         // to adjust that if this changes.
-        let frozen = self.book.frozen_rows(self.book.location.sheet);
+        let frozen = self.clipped_frozen_rows(height);
         // The frozen rows take screen rows. Keep one row to scroll in.
         let height = height.saturating_sub(frozen as u16).max(2);
         let mut length = 1;
@@ -108,6 +112,12 @@ impl<'ws> Viewport<'ws> {
             }
         }
         (1..=frozen).chain(start..=end).collect()
+    }
+
+    /// The frozen rows that fit, leaving the header and one row to scroll.
+    fn clipped_frozen_rows(&self, height: u16) -> usize {
+        let stored = self.book.frozen_rows(self.book.location.sheet);
+        stored.min(height.saturating_sub(2) as usize)
     }
 
     pub(crate) fn get_visible_columns(
@@ -197,7 +207,10 @@ impl<'ws> Viewport<'ws> {
         if let Some(vc) = visible_columns.get(frozen_cols) {
             state.prev_corner.col = vc.idx
         }
-        let frozen_rows = self.book.frozen_rows(self.book.location.sheet);
+        let sheet = self.book.location.sheet;
+        let frozen_rows = self.clipped_frozen_rows(height);
+        state.freeze_clipped = frozen_rows < self.book.frozen_rows(sheet)
+            || frozen_cols < self.book.frozen_columns(sheet);
         if let Some(vr) = visible_rows.get(frozen_rows) {
             state.prev_corner.row = *vr;
         }

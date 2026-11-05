@@ -78,6 +78,16 @@ impl<'ws> Workspace<'ws> {
                 .with_search(search.as_ref().map(|(matcher, within)| (matcher, *within)))
                 .block(table_block);
                 StatefulWidget::render(viewport, rect, buf, &mut ws.state.viewport_state);
+                let vs = &mut ws.state.viewport_state;
+                if !vs.freeze_clipped {
+                    vs.freeze_clip_reported = false;
+                } else if !vs.freeze_clip_reported {
+                    vs.freeze_clip_reported = true;
+                    ws.set_message(
+                        MessageLevel::Info,
+                        "Freeze clipped to fit the screen".to_string(),
+                    );
+                }
             }),
         ];
 
@@ -154,6 +164,12 @@ impl<'widget, 'ws: 'widget> Widget for &'widget mut Workspace<'ws> {
                     .with_bottom_title("Y/N");
             popup.render(area, buf);
         } else {
+            // Draw the parts first: rendering the grid may set a message,
+            // and the border below shows it.
+            for (rect, f) in self.get_render_parts(area) {
+                f(rect, buf, self);
+            }
+
             let theme = &self.state.theme;
             let status = theme.get(Slot::Status);
             let mut outer_block = Block::bordered()
@@ -202,10 +218,6 @@ impl<'widget, 'ws: 'widget> Widget for &'widget mut Workspace<'ws> {
                     )
                     .right_aligned(),
                 );
-
-            for (rect, f) in self.get_render_parts(area) {
-                f(rect, buf, self);
-            }
 
             outer_block.render(area, buf);
         }

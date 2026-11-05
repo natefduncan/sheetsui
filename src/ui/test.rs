@@ -4951,3 +4951,65 @@ fn test_bare_freeze_same_as_existing_is_not_dirty() {
     cmd_line(&mut ws, "freeze");
     assert!(!ws.book.dirty);
 }
+
+fn draw_lines(ws: &mut Workspace, w: u16, h: u16) -> Vec<String> {
+    use ratatui::{backend::TestBackend, Terminal};
+    let mut term = Terminal::new(TestBackend::new(w, h)).expect("terminal");
+    term.draw(|f| super::render::draw(f, ws)).expect("draw");
+    let buf = term.backend().buffer().clone();
+    (0..h)
+        .map(|y| (0..w).map(|x| buf[(x, y)].symbol().to_owned()).collect())
+        .collect()
+}
+
+#[test]
+fn test_freeze_larger_than_screen_clips_rows_and_reports() {
+    let mut ws = new_workspace();
+    cmd_line(&mut ws, "freeze 30");
+    let rows = draw_lines(&mut ws, 60, 24);
+    assert_eq!(Some("Freeze clipped to fit the screen".to_string()), message_text(&ws));
+    assert_eq!(30, ws.book.frozen_rows(0), "stored count stays as typed");
+    // The cursor can still move and scroll.
+    run(&mut ws, script().chars(&"j".repeat(40)));
+    let rows2 = draw_lines(&mut ws, 60, 24);
+    assert!(rows2.iter().any(|r| r.contains("│41")), "{rows2:#?}\n{rows:#?}");
+    assert_eq!(30, ws.book.frozen_rows(0));
+}
+
+#[test]
+fn test_freeze_larger_than_screen_clips_columns() {
+    let mut ws = new_workspace();
+    cmd_line(&mut ws, "freeze 0 20");
+    draw_lines(&mut ws, 40, 24);
+    assert_eq!(Some("Freeze clipped to fit the screen".to_string()), message_text(&ws));
+    assert_eq!(20, ws.book.frozen_columns(0));
+    run(&mut ws, script().chars(&"l".repeat(25)));
+    let rows = draw_lines(&mut ws, 40, 24);
+    assert!(rows.iter().any(|r| r.contains('Z')), "{rows:#?}");
+}
+
+#[test]
+fn test_freeze_clip_goes_away_when_the_terminal_grows() {
+    let mut ws = new_workspace();
+    cmd_line(&mut ws, "freeze 10");
+    draw_lines(&mut ws, 60, 14);
+    assert!(ws.state.viewport_state.freeze_clipped);
+    let rows = draw_lines(&mut ws, 60, 30);
+    assert!(!ws.state.viewport_state.freeze_clipped);
+    assert!(rows.iter().any(|r| r.contains("│10")), "{rows:#?}");
+}
+
+#[test]
+fn test_freeze_clip_saves_the_typed_count() {
+    let mut ws = new_workspace();
+    cmd_line(&mut ws, "freeze 30 2");
+    draw_lines(&mut ws, 60, 14);
+    let dir = std::env::temp_dir().join(format!("sheetsui-clip-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("clip.xlsx");
+    ws.book.save_to_xlsx(path.to_str().unwrap()).expect("save");
+    let loaded = book::Book::new_from_xlsx(path.to_str().unwrap()).expect("load");
+    assert_eq!(30, loaded.frozen_rows(0));
+    assert_eq!(2, loaded.frozen_columns(0));
+    std::fs::remove_dir_all(&dir).ok();
+}
