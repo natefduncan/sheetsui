@@ -54,7 +54,7 @@ The currently supported commands are:
 * `nunmap <keys>` remove a navigation mode mapping, or turn off a built-in key. `vunmap` does the same for range select mode.
 * `nmap` list your navigation mode mappings and the warnings from loading the keys file. `vmap` lists the range select ones.
 
-Inserting rows at or above the last frozen row (or columns at or left of the last frozen column) grows the freeze by the number inserted, as in Excel. Inserting below or right of the freeze leaves it alone. Undoing an insert does not change the freeze.
+Inserting rows at or above the last frozen row (or columns at or left of the last frozen column) grows the freeze by the number inserted. Inserting below or right of the freeze leaves it alone. Undoing an insert does not change the freeze.
 
 ## Sorting
 

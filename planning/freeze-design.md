@@ -38,7 +38,7 @@ decision says which wins. In every case so far they agreed.
 | F6 | The boundary is a border line, drawn with a new theme slot `FreezeLine`, under the frozen rows and to the right of the frozen columns. It uses one screen row and one column, and only while a freeze is set. |
 | F7 | Bare `:freeze` counts from row 1 and column A, not from the top of the screen. The message line reports what it pinned. |
 | F8 | Movement follows Excel. See "Navigation". |
-| F9 | `insert-rows` and `insert-cols` follow Excel. See "Inserting rows and columns". |
+| F9 | `insert-rows` and `insert-cols` adjust the freeze by sheetui's own rule, which is not checked against Excel. See "Inserting rows and columns". |
 | F10 | Default: bare `:freeze` with the cursor on A1 pins nothing, changes nothing, and says so. |
 | F11 | Default: each sheet has its own freeze. Counts that are negative, not whole numbers, or past the last row or column are errors that leave the freeze alone. |
 | F12 | Default: `:freeze 0 0` and `:unfreeze` mean the same thing. |
