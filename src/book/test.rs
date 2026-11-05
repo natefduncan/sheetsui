@@ -1547,3 +1547,97 @@ fn test_substitute_on_a_large_sheet_is_one_undo_step() {
     assert_eq!(rendered(&book, 250, 20), "a");
     assert!(!book.undo().expect("undo"));
 }
+
+/// Stage 0 for the freeze design (F3): the freeze is applied to a copy of the
+/// model at save time, which needs `Model::to_bytes`/`from_bytes` to lose
+/// nothing a save would write.
+#[test]
+fn test_model_byte_round_trip_loses_nothing() {
+    let mut book = Book::default();
+    book.new_sheet(Some("Second")).expect("new sheet");
+    let first = Address { sheet: 0, row: 1, col: 1 };
+    book.update_cell(&first, "Header").expect("a1");
+    book.update_cell(&Address { sheet: 0, row: 2, col: 1 }, "41").expect("a2");
+    book.update_cell(&Address { sheet: 0, row: 2, col: 2 }, "=A2+1").expect("b2");
+    book.update_cell(&Address { sheet: 0, row: 3, col: 2 }, "0.5").expect("b3");
+    book.update_cell(&Address { sheet: 1, row: 1, col: 1 }, "=Sheet1!B2*2").expect("s2 a1");
+    book.update_cell(&Address { sheet: 1, row: 4, col: 3 }, "text").expect("s2 c4");
+    book.set_cell_style(
+        &[("font.b", "true"), ("font.color", "#00ff00"), ("fill.color", "#ff0000")],
+        &Area { sheet: 0, row: 1, column: 1, width: 2, height: 1 },
+    )
+    .expect("style header");
+    book.set_cell_style(
+        &[("num_fmt", "0.00%"), ("font.i", "true")],
+        &Area { sheet: 0, row: 3, column: 2, width: 1, height: 1 },
+    )
+    .expect("style pct");
+    book.set_cell_style(
+        &[("fill.color", "#0000ff")],
+        &Area { sheet: 1, row: 4, column: 3, width: 1, height: 1 },
+    )
+    .expect("style sheet 2");
+    book.set_column_size_for_sheet(0, 1, 30).expect("width a");
+    book.set_column_size_for_sheet(0, 2, 7).expect("width b");
+    book.set_column_size_for_sheet(1, 3, 22).expect("width s2 c");
+    book.evaluate();
+
+    let original = book.model.get_model();
+    let copy = Model::from_bytes(&original.to_bytes(), "en").expect("from_bytes");
+
+    let sheets = original.workbook.worksheets.len();
+    assert_eq!(2, sheets);
+    assert_eq!(sheets, copy.workbook.worksheets.len());
+    let mut checked_styles = 0;
+    for sheet in 0..sheets as u32 {
+        assert_eq!(
+            original.workbook.worksheets[sheet as usize].name,
+            copy.workbook.worksheets[sheet as usize].name
+        );
+        for col in 1..=6 {
+            assert_eq!(
+                original.get_column_width(sheet, col).expect("orig width"),
+                copy.get_column_width(sheet, col).expect("copy width"),
+                "width sheet {sheet} col {col}"
+            );
+        }
+        for row in 1..=6 {
+            for col in 1..=6 {
+                let at = format!("sheet {sheet} r{row} c{col}");
+                assert_eq!(
+                    original.get_cell_value_by_index(sheet, row, col),
+                    copy.get_cell_value_by_index(sheet, row, col),
+                    "value {at}"
+                );
+                assert_eq!(
+                    original.get_cell_formula(sheet, row, col),
+                    copy.get_cell_formula(sheet, row, col),
+                    "formula {at}"
+                );
+                assert_eq!(
+                    original.get_formatted_cell_value(sheet, row, col),
+                    copy.get_formatted_cell_value(sheet, row, col),
+                    "formatted {at}"
+                );
+                let style = original.get_style_for_cell(sheet, row, col).expect("orig style");
+                assert_eq!(
+                    style,
+                    copy.get_style_for_cell(sheet, row, col).expect("copy style"),
+                    "style {at}"
+                );
+                if style != original.get_style_for_cell(sheet, 6, 6).expect("default") {
+                    checked_styles += 1;
+                }
+            }
+        }
+    }
+    // The fixture really did carry styles, so the equality above means something.
+    assert!(checked_styles >= 4, "only {checked_styles} styled cells");
+    assert_eq!(
+        Ok(84.0),
+        copy.get_cell_value_by_index(1, 1, 1).map(|v| match v {
+            ironcalc::base::cell::CellValue::Number(n) => n,
+            _ => f64::NAN,
+        })
+    );
+}
