@@ -908,64 +908,8 @@ impl<'ws> Workspace<'ws> {
                 self.book.evaluate();
                 Ok(None)
             }
-            Ok(Some(Cmd::DeleteRows(count))) => {
-                // In Range Select the selection's rows go, and any count is
-                // ignored. Like a sort, an error is shown, not fatal.
-                let stack = &self.state.modality_stack;
-                let from_navigate = stack.last() == Some(&Modality::RangeSelect)
-                    && stack.get(stack.len().wrapping_sub(2)) == Some(&Modality::Navigate);
-                let (first, count) = match self
-                    .state
-                    .range_select
-                    .current(&self.book.location)
-                    .filter(|_| from_navigate)
-                {
-                    Some((a, b)) => {
-                        let (lo, hi) = (a.row.min(b.row), a.row.max(b.row));
-                        (lo, hi - lo + 1)
-                    }
-                    None => (self.book.location.row, count),
-                };
-                if from_navigate {
-                    self.exit_range_select_mode()?;
-                }
-                if let Err(e) = self.book.delete_rows(first, count) {
-                    self.enter_dialog_mode(Markdown::from_str(&e.to_string()));
-                } else {
-                    self.book.evaluate();
-                }
-                self.handle_movement_change();
-                Ok(None)
-            }
-            Ok(Some(Cmd::DeleteColumns(count))) => {
-                // In Range Select the selection's columns go, and any count is
-                // ignored. Like a sort, an error is shown, not fatal.
-                let stack = &self.state.modality_stack;
-                let from_navigate = stack.last() == Some(&Modality::RangeSelect)
-                    && stack.get(stack.len().wrapping_sub(2)) == Some(&Modality::Navigate);
-                let (first, count) = match self
-                    .state
-                    .range_select
-                    .current(&self.book.location)
-                    .filter(|_| from_navigate)
-                {
-                    Some((a, b)) => {
-                        let (lo, hi) = (a.col.min(b.col), a.col.max(b.col));
-                        (lo, hi - lo + 1)
-                    }
-                    None => (self.book.location.col, count),
-                };
-                if from_navigate {
-                    self.exit_range_select_mode()?;
-                }
-                if let Err(e) = self.book.delete_columns(first, count) {
-                    self.enter_dialog_mode(Markdown::from_str(&e.to_string()));
-                } else {
-                    self.book.evaluate();
-                }
-                self.handle_movement_change();
-                Ok(None)
-            }
+            Ok(Some(Cmd::DeleteRows(count))) => self.delete_rows_or_selection(count),
+            Ok(Some(Cmd::DeleteColumns(count))) => self.delete_cols_or_selection(count),
             Ok(Some(Cmd::RenameSheet(idx, name))) => {
                 match idx {
                     Some(idx) => {
@@ -1131,6 +1075,12 @@ impl<'ws> Workspace<'ws> {
         match handler {
             RangeHandler::Help => {
                 self.enter_dialog_mode(self.render_help_text());
+            }
+            RangeHandler::DeleteRows => {
+                return self.delete_rows_or_selection(1);
+            }
+            RangeHandler::DeleteCols => {
+                return self.delete_cols_or_selection(1);
             }
             RangeHandler::ClearRangeAll => {
                 if let Some((start, end)) = self.state.range_select.get_range() {
@@ -1435,6 +1385,16 @@ impl<'ws> Workspace<'ws> {
                     Ok(())
                 })?;
             }
+            NavHandler::DeleteRows => {
+                let count = self.state.get_n_prefix();
+                self.state.reset_n_prefix();
+                return self.delete_rows_or_selection(count);
+            }
+            NavHandler::DeleteCols => {
+                let count = self.state.get_n_prefix();
+                self.state.reset_n_prefix();
+                return self.delete_cols_or_selection(count);
+            }
             NavHandler::ClearCell => {
                 self.book.clear_current_cell()?;
             }
@@ -1621,6 +1581,66 @@ impl<'ws> Workspace<'ws> {
         }
         self.state.clipboard = None;
         Ok(())
+    }
+
+    /// Deletes `count` from the cursor, or the selection's when in Range
+    /// Select. Like a sort, an error is shown, not fatal.
+    fn delete_rows_or_selection(&mut self, count: usize) -> Result<Option<ExitCode>> {
+        let stack = &self.state.modality_stack;
+            let from_navigate = stack.last() == Some(&Modality::RangeSelect)
+                && stack.get(stack.len().wrapping_sub(2)) == Some(&Modality::Navigate);
+            let (first, count) = match self
+                .state
+                .range_select
+                .current(&self.book.location)
+                .filter(|_| from_navigate)
+            {
+                Some((a, b)) => {
+                    let (lo, hi) = (a.row.min(b.row), a.row.max(b.row));
+                    (lo, hi - lo + 1)
+                }
+                None => (self.book.location.row, count),
+            };
+            if from_navigate {
+                self.exit_range_select_mode()?;
+            }
+            if let Err(e) = self.book.delete_rows(first, count) {
+                self.enter_dialog_mode(Markdown::from_str(&e.to_string()));
+            } else {
+                self.book.evaluate();
+            }
+            self.handle_movement_change();
+        Ok(None)
+    }
+
+    /// Deletes `count` from the cursor, or the selection's when in Range
+    /// Select. Like a sort, an error is shown, not fatal.
+    fn delete_cols_or_selection(&mut self, count: usize) -> Result<Option<ExitCode>> {
+        let stack = &self.state.modality_stack;
+            let from_navigate = stack.last() == Some(&Modality::RangeSelect)
+                && stack.get(stack.len().wrapping_sub(2)) == Some(&Modality::Navigate);
+            let (first, count) = match self
+                .state
+                .range_select
+                .current(&self.book.location)
+                .filter(|_| from_navigate)
+            {
+                Some((a, b)) => {
+                    let (lo, hi) = (a.col.min(b.col), a.col.max(b.col));
+                    (lo, hi - lo + 1)
+                }
+                None => (self.book.location.col, count),
+            };
+            if from_navigate {
+                self.exit_range_select_mode()?;
+            }
+            if let Err(e) = self.book.delete_columns(first, count) {
+                self.enter_dialog_mode(Markdown::from_str(&e.to_string()));
+            } else {
+                self.book.evaluate();
+            }
+            self.handle_movement_change();
+        Ok(None)
     }
 
     fn run_with_prefix(

@@ -44,6 +44,14 @@ impl InputScript {
         self.event(construct_key_event(KeyCode::Tab))
     }
 
+    pub fn del(self) -> Self {
+        self.event(construct_key_event(KeyCode::Delete))
+    }
+
+    pub fn shift_del(self) -> Self {
+        self.event(construct_modified_key_event(KeyCode::Delete, KeyModifiers::SHIFT))
+    }
+
     pub fn enter(self) -> Self {
         self.event(construct_key_event(KeyCode::Enter))
     }
@@ -1693,7 +1701,7 @@ fn test_clear_cell() {
             .expect("failed to get cell contents")
     );
     script()
-        .char('d')
+        .char('x')
         .run(&mut ws)
         .expect("Failed to run input script");
     assert_eq!(
@@ -1718,7 +1726,7 @@ fn test_clear_cell_all() {
             .expect("failed to get cell contents")
     );
     script()
-        .char('D')
+        .char('X')
         .run(&mut ws)
         .expect("Failed to run input script");
     assert_eq!(
@@ -1952,7 +1960,7 @@ macro_rules! assert_range_clear {
 
 #[test]
 fn test_range_select_clear_upper_d() {
-    assert_range_clear!(script().char('j').char('l').char('D'));
+    assert_range_clear!(script().char('j').char('l').shift_del());
 }
 
 #[test]
@@ -2002,7 +2010,7 @@ fn test_range_select_movement() {
 
 #[test]
 fn test_range_select_clear_lower_d() {
-    assert_range_clear!(script().char('j').char('l').char('d'));
+    assert_range_clear!(script().char('j').char('l').del());
 }
 
 macro_rules! assert_range_copy {
@@ -5095,4 +5103,80 @@ fn test_delete_cols_command_in_range_select_ignores_the_count() {
     assert_eq!("4", ws.book.get_cell_addr_rendered(&Address { row: 1, col: 2, sheet: 0 }).unwrap());
     assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
     assert_eq!(2, ws.book.location.col);
+}
+
+#[test]
+fn test_dd_deletes_a_row_and_3dd_three() {
+    let mut ws = sort_workspace(&[&["1"], &["2"], &["3"], &["4"], &["5"]]);
+    script().char('j').chars("dd").run(&mut ws).expect("dd");
+    assert_eq!(sheet_column(&ws, 1, 1..=4), vec!["1", "3", "4", "5"]);
+    assert_eq!(2, ws.book.location.row);
+    script().chars("3dd").run(&mut ws).expect("3dd");
+    assert_eq!(sheet_column(&ws, 1, 1..=2), vec!["1", ""]);
+    assert!(ws.state.numeric_prefix.is_empty());
+}
+
+#[test]
+fn test_u_after_dd_restores_the_row_in_one_step() {
+    let mut ws = sort_workspace(&[&["1"], &["2"], &["3"]]);
+    script().char('j').chars("2dd").char('u').run(&mut ws).expect("keys");
+    assert_eq!(sheet_column(&ws, 1, 1..=3), vec!["1", "2", "3"]);
+}
+
+#[test]
+fn test_dc_and_2dc_delete_columns() {
+    let mut ws = sort_workspace(&[&["a", "b", "c", "d"]]);
+    script().char('l').chars("dc").run(&mut ws).expect("dc");
+    assert_eq!("a", sheet_column(&ws, 1, 1..=1)[0]);
+    assert_eq!("c", sheet_column(&ws, 2, 1..=1)[0]);
+    script().chars("2dc").run(&mut ws).expect("2dc");
+    assert_eq!("", sheet_column(&ws, 2, 1..=1)[0]);
+    assert_eq!("a", sheet_column(&ws, 1, 1..=1)[0]);
+}
+
+#[test]
+fn test_a_lone_d_waits_and_esc_cancels_it() {
+    let mut ws = sort_workspace(&[&["1"], &["2"]]);
+    script().char('d').run(&mut ws).expect("d");
+    assert_eq!(1, ws.state.pending_keys.len());
+    assert_eq!(sheet_column(&ws, 1, 1..=2), vec!["1", "2"]);
+    script().esc().run(&mut ws).expect("esc");
+    assert!(ws.state.pending_keys.is_empty());
+    assert_eq!(sheet_column(&ws, 1, 1..=2), vec!["1", "2"]);
+}
+
+#[test]
+fn test_range_select_d_deletes_rows_and_big_d_columns() {
+    let mut ws = sort_workspace(&[&["1", "a"], &["2", "b"], &["3", "c"], &["4", "d"]]);
+    script().char('j').char('v').char('j').char('2').char('d').run(&mut ws).expect("d");
+    assert_eq!(sheet_column(&ws, 1, 1..=2), vec!["1", "4"]);
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    script().char('v').char('D').run(&mut ws).expect("D");
+    assert_eq!(sheet_column(&ws, 1, 1..=2), vec!["a", "d"]);
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_dd_can_be_remapped_and_unmapped() {
+    let mut ws = sort_workspace(&[&["1"], &["2"], &["3"]]);
+    type_command(&mut ws, "nnoremap X dd");
+    script().char('X').run(&mut ws).expect("X");
+    assert_eq!(sheet_column(&ws, 1, 1..=2), vec!["2", "3"]);
+    type_command(&mut ws, "nunmap dd");
+    script().chars("dd").run(&mut ws).expect("dd");
+    assert_eq!(sheet_column(&ws, 1, 1..=2), vec!["2", "3"]);
+}
+
+#[test]
+fn test_help_lists_the_delete_keys() {
+    use crate::ui::keys::{builtin, help, map::MapMode};
+    let ws = new_workspace();
+    let nav = help::group_text(builtin::navigation(), ws.state.keymap.table(MapMode::Navigate), "modify")
+        .expect("modify group");
+    assert!(nav.contains("`dd`: delete the current row"), "{nav}");
+    assert!(nav.contains("`dc`: delete the current column"), "{nav}");
+    let range = help::group_text(builtin::range_select(), ws.state.keymap.table(MapMode::RangeSelect), "selection")
+        .expect("selection group");
+    assert!(range.contains("`d`: delete the rows the range touches"), "{range}");
+    assert!(range.contains("`D`: delete the columns the range touches"), "{range}");
 }
