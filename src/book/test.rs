@@ -1931,3 +1931,107 @@ fn test_delete_rows_shifts_conditional_format_ranges() {
     let cf = &book.model.get_model().workbook.worksheets[0].conditional_formatting;
     assert_eq!("A3:A6", cf[0].range);
 }
+
+// -------------------------------------------------------------------------
+// Delete columns
+
+fn row_vals(book: &Book, row: usize, cols: std::ops::RangeInclusive<usize>) -> Vec<String> {
+    cols.map(|c| rendered(book, row, c)).collect()
+}
+
+fn cols_book(n: usize) -> Book {
+    let mut book = Book::default();
+    for c in 1..=n {
+        book.update_cell(&phase2_addr(1, c), c.to_string()).expect("set");
+    }
+    book.evaluate();
+    book.clear_history();
+    book.dirty = false;
+    book
+}
+
+#[test]
+fn test_delete_columns_shifts_columns_left() {
+    let mut book = cols_book(6);
+    book.delete_columns(2, 1).expect("delete");
+    assert_eq!(row_vals(&book, 1, 1..=5), vec!["1", "3", "4", "5", "6"]);
+    assert!(book.dirty);
+    let mut book = cols_book(6);
+    book.delete_columns(2, 3).expect("delete");
+    assert_eq!(row_vals(&book, 1, 1..=3), vec!["1", "5", "6"]);
+}
+
+#[test]
+fn test_delete_columns_cursor_rules() {
+    let mut book = cols_book(6);
+    at(&mut book, 1, 3);
+    book.delete_columns(2, 3).expect("delete");
+    assert_eq!(book.location, phase2_addr(1, 2));
+    let mut book = cols_book(6);
+    at(&mut book, 1, 1);
+    book.delete_columns(2, 3).expect("delete");
+    assert_eq!(book.location, phase2_addr(1, 1));
+    let mut book = cols_book(10);
+    at(&mut book, 1, 10);
+    book.delete_columns(3, 4).expect("delete");
+    assert_eq!(book.location, phase2_addr(1, 6));
+    assert_eq!("10", book.get_current_cell_rendered().unwrap());
+    let mut book = cols_book(4);
+    at(&mut book, 1, 4);
+    book.delete_columns(4, 1).expect("delete");
+    assert_eq!(book.location, phase2_addr(1, 4));
+    assert_eq!("", book.get_current_cell_rendered().unwrap());
+}
+
+#[test]
+fn test_delete_columns_is_one_undo_step() {
+    let mut book = cols_book(6);
+    at(&mut book, 1, 3);
+    book.delete_columns(2, 3).expect("delete");
+    assert!(book.undo().expect("undo"));
+    assert_eq!(row_vals(&book, 1, 1..=6), vec!["1", "2", "3", "4", "5", "6"]);
+    assert_eq!(book.location, phase2_addr(1, 3));
+    assert!(!book.dirty);
+    assert!(!book.undo().expect("nothing before"));
+}
+
+#[test]
+fn test_delete_columns_errors_change_nothing() {
+    let mut book = cols_book(3);
+    at(&mut book, 1, 2);
+    assert!(book.delete_columns(2, 0).is_err());
+    assert!(book.delete_columns(16_384, 2).is_err());
+    assert!(book.delete_columns(16_385, 1).is_err());
+    assert_eq!(row_vals(&book, 1, 1..=3), vec!["1", "2", "3"]);
+    assert_eq!(book.location, phase2_addr(1, 2));
+    assert!(!book.dirty);
+    assert!(!book.undo().expect("undo"));
+}
+
+#[test]
+fn test_delete_columns_partly_overlapping_an_array_formula_is_refused() {
+    let mut book = csv_book("1,2,3,4\n");
+    book.model.set_user_array_formula(0, 1, 2, 2, 1, "=A1:B1*2").expect("set");
+    book.evaluate();
+    book.clear_history();
+    book.dirty = false;
+    let before = row_vals(&book, 1, 1..=4);
+    let err = book.delete_columns(3, 1).expect_err("array");
+    assert!(err.to_string().contains("array formula"), "{err}");
+    assert_eq!(row_vals(&book, 1, 1..=4), before);
+    assert!(!book.dirty);
+    assert!(!book.undo().expect("undo"));
+}
+
+#[test]
+fn test_delete_columns_rewrites_references() {
+    let mut book = cols_book(9);
+    book.update_cell(&phase2_addr(2, 1), "=E1").expect("set");
+    book.update_cell(&phase2_addr(2, 2), "=I1").expect("set");
+    book.evaluate();
+    book.delete_columns(5, 1).expect("delete");
+    book.evaluate();
+    assert_eq!("#REF!", rendered(&book, 2, 1));
+    assert_eq!("=H1", book.get_cell_addr_contents(&phase2_addr(2, 2)).unwrap());
+    assert_eq!("9", rendered(&book, 2, 2));
+}

@@ -5056,3 +5056,43 @@ fn test_delete_rows_command_in_range_select_ignores_the_count() {
     assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
     assert_eq!(2, ws.book.location.row);
 }
+
+#[test]
+fn test_delete_cols_cmd_forms() {
+    assert_eq!(Cmd::DeleteColumns(1), parse("delete-cols").unwrap().unwrap());
+    assert_eq!(Cmd::DeleteColumns(3), parse("delete-cols 3").unwrap().unwrap());
+    assert_eq!(Cmd::DeleteColumns(2), parse("dc 2").unwrap().unwrap());
+    assert!(parse("delete-cols x").is_err());
+    assert!(parse("delete-cols 1.5").is_err());
+    assert!(parse("delete-cols -1").is_err());
+    assert!(parse("delete-colsx").is_err());
+}
+
+#[test]
+fn test_delete_cols_command_deletes_from_the_cursor_column() {
+    let mut ws = sort_workspace(&[&["1", "2", "3", "4"]]);
+    script().char('l').run(&mut ws).expect("move");
+    run_command(&mut ws, "delete-cols 2");
+    assert_eq!(vec!["1", "4", ""], (1..=3).map(|c| ws.book.get_cell_addr_rendered(&Address { row: 1, col: c, sheet: 0 }).unwrap()).collect::<Vec<_>>());
+    assert_eq!(2, ws.book.location.col);
+    assert!(ws.book.undo().expect("undo"));
+    assert_eq!("3", ws.book.get_cell_addr_rendered(&Address { row: 1, col: 3, sheet: 0 }).unwrap());
+}
+
+#[test]
+fn test_delete_cols_command_errors_are_a_dialog_and_change_nothing() {
+    let mut ws = sort_workspace(&[&["1", "2"]]);
+    run_command(&mut ws, "delete-cols 0");
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+    assert_eq!("2", ws.book.get_cell_addr_rendered(&Address { row: 1, col: 2, sheet: 0 }).unwrap());
+}
+
+#[test]
+fn test_delete_cols_command_in_range_select_ignores_the_count() {
+    let mut ws = sort_workspace(&[&["1", "2", "3", "4", "5"]]);
+    script().char('l').char('v').char('l').run(&mut ws).expect("select");
+    run_command(&mut ws, "delete-cols 9");
+    assert_eq!("4", ws.book.get_cell_addr_rendered(&Address { row: 1, col: 2, sheet: 0 }).unwrap());
+    assert_eq!(Some(&Modality::Navigate), ws.state.modality_stack.last());
+    assert_eq!(2, ws.book.location.col);
+}

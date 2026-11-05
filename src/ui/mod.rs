@@ -937,6 +937,35 @@ impl<'ws> Workspace<'ws> {
                 self.handle_movement_change();
                 Ok(None)
             }
+            Ok(Some(Cmd::DeleteColumns(count))) => {
+                // In Range Select the selection's columns go, and any count is
+                // ignored. Like a sort, an error is shown, not fatal.
+                let stack = &self.state.modality_stack;
+                let from_navigate = stack.last() == Some(&Modality::RangeSelect)
+                    && stack.get(stack.len().wrapping_sub(2)) == Some(&Modality::Navigate);
+                let (first, count) = match self
+                    .state
+                    .range_select
+                    .current(&self.book.location)
+                    .filter(|_| from_navigate)
+                {
+                    Some((a, b)) => {
+                        let (lo, hi) = (a.col.min(b.col), a.col.max(b.col));
+                        (lo, hi - lo + 1)
+                    }
+                    None => (self.book.location.col, count),
+                };
+                if from_navigate {
+                    self.exit_range_select_mode()?;
+                }
+                if let Err(e) = self.book.delete_columns(first, count) {
+                    self.enter_dialog_mode(Markdown::from_str(&e.to_string()));
+                } else {
+                    self.book.evaluate();
+                }
+                self.handle_movement_change();
+                Ok(None)
+            }
             Ok(Some(Cmd::RenameSheet(idx, name))) => {
                 match idx {
                     Some(idx) => {
