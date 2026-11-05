@@ -693,3 +693,76 @@ fn test_builtin_themes_define_the_freeze_line() {
         assert_ne!(Style::default(), theme.get(Slot::FreezeLine), "{name}");
     }
 }
+
+#[test]
+fn test_frozen_cells_never_change_the_scroll() {
+    let mut book = Book::from_model(
+        Model::new_empty("test", "en", "America/New_York", "en").expect("Failed to make model"),
+    );
+    book.set_frozen(0, 2, 1).unwrap();
+    let app_state = AppState::default();
+    let mut state = ViewportState::default();
+    let mut frame = |row, col| {
+        let viewport = Viewport::new(&book, Some(&app_state.range_select), &app_state.theme)
+            .with_selected(Address { sheet: 0, row, col });
+        let rows = viewport.get_visible_rows(8, &state);
+        let cols: Vec<usize> = viewport
+            .get_visible_columns(80, &state)
+            .unwrap()
+            .iter()
+            .map(|c| c.idx)
+            .collect();
+        // Settle the scroll the way a render does.
+        viewport.to_table(80, 8, &mut state).unwrap();
+        (rows, cols)
+    };
+    let (far_rows, far_cols) = frame(500, 40);
+    assert_eq!(vec![1, 2, 497, 498, 499, 500], far_rows);
+    // Jumping to A1 (`gg`) and walking the frozen cells does not scroll.
+    for (row, col) in [(1, 1), (2, 1), (2, 40), (500, 1), (1, 40), (1, 1)] {
+        let (rows, cols) = frame(row, col);
+        assert_eq!(far_rows[2..], rows[2..], "rows moved at ({row},{col})");
+        assert_eq!(far_cols[1..], cols[1..], "cols moved at ({row},{col})");
+    }
+    // A jump to a scrolling cell scrolls the least that reveals it.
+    let (rows, _) = frame(3, 1);
+    assert_eq!(vec![1, 2, 3, 4, 5, 6], rows);
+    // No row or column ever shows twice.
+    let (rows, cols) = frame(1, 1);
+    let mut r = rows.clone();
+    r.dedup();
+    assert_eq!(rows, r);
+    let mut c = cols.clone();
+    c.dedup();
+    assert_eq!(cols, c);
+}
+
+#[test]
+fn test_range_select_highlights_both_sides_of_the_freeze() {
+    use crate::ui::{theme::Slot, RangeSelection};
+    use ratatui::{backend::TestBackend, widgets::StatefulWidget, Terminal};
+    let mut book = Book::from_model(
+        Model::new_empty("test", "en", "America/New_York", "en").expect("Failed to make model"),
+    );
+    book.set_frozen(0, 1, 0).unwrap();
+    book.move_to(&Address { sheet: 0, row: 50, col: 2 }).unwrap();
+    let app_state = AppState::default();
+    let sel = RangeSelection {
+        start: Some(Address { sheet: 0, row: 1, col: 1 }),
+        end: Some(Address { sheet: 0, row: 50, col: 1 }),
+        ..Default::default()
+    };
+    let viewport = Viewport::new(&book, Some(&sel), &app_state.theme)
+        .with_selected(book.location.clone());
+    let mut term = Terminal::new(TestBackend::new(60, 14)).expect("terminal");
+    term.draw(|f| {
+        viewport.render(f.area(), f.buffer_mut(), &mut ViewportState::default());
+    })
+    .expect("draw");
+    let buf = term.backend().buffer();
+    let want = app_state.theme.get(Slot::Selection).bg.expect("bg");
+    // Row 1 sits under the header; the last scrolling row is row 50.
+    assert_eq!(want, buf[(6, 1)].bg, "frozen row 1 not highlighted");
+    assert_eq!(want, buf[(6, 11)].bg, "scrolling row 50 not highlighted");
+    assert_ne!(want, buf[(26, 5)].bg, "a cell outside the range was highlighted");
+}

@@ -94,9 +94,14 @@ impl<'ws> Viewport<'ws> {
         let height = height.saturating_sub(frozen as u16 + line).max(2);
         let mut length = 1;
         // `prev_corner` is the first scrolling row, never above the freeze.
+        // A cursor in the frozen rows does not scroll.
         let start_row = std::cmp::max(
             frozen + 1,
-            std::cmp::min(self.selected.row, state.prev_corner.row),
+            if self.selected.row <= frozen {
+                state.prev_corner.row
+            } else {
+                std::cmp::min(self.selected.row, state.prev_corner.row)
+            },
         );
         let mut start = start_row;
         let mut end = start_row;
@@ -163,9 +168,14 @@ impl<'ws> Viewport<'ws> {
         }
         let mut visible = Vec::new();
         // `prev_corner` is the first scrolling column, never left of the freeze.
+        // A cursor in the frozen columns does not scroll.
         let start_idx = std::cmp::max(
             nfrozen + 1,
-            std::cmp::min(self.selected.col, state.prev_corner.col),
+            if self.selected.col <= nfrozen {
+                state.prev_corner.col
+            } else {
+                std::cmp::min(self.selected.col, state.prev_corner.col)
+            },
         );
         for idx in start_idx..=(book::LAST_COLUMN as usize) {
             let size = self.book.get_col_size(idx)? as u16;
