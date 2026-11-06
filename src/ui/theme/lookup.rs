@@ -75,6 +75,7 @@ pub fn load(value: &str, themes_dir: Option<&Path>) -> Result<(Theme, Vec<Warnin
         }
     };
     let (mut theme, warnings) = parse(&text, &base);
+    let warnings = Warning::with_source(warnings, &name);
     theme.name = name;
     Ok((theme, warnings))
 }
@@ -91,7 +92,14 @@ pub fn resolve(
     };
     match load(value, themes_dir) {
         Ok(found) => found,
-        Err(msg) => (Theme::default(), vec![Warning { line: 0, msg }]),
+        Err(msg) => (
+            Theme::default(),
+            vec![Warning {
+                source: value.to_owned(),
+                line: 0,
+                msg,
+            }],
+        ),
     }
 }
 

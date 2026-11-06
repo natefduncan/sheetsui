@@ -76,6 +76,7 @@ fn missing_theme_falls_back_with_warning() {
     assert_eq!(Theme::default(), t);
     assert_eq!(1, w.len());
     assert_eq!(0, w[0].line);
+    assert_eq!("nope", w[0].source);
     let (t, w) = resolve(Some("/no/such/dir/x.theme"), None, None);
     assert_eq!(Theme::default(), t);
     assert_eq!(1, w.len());
@@ -163,4 +164,15 @@ fn a_user_theme_without_the_search_slots_falls_back_to_default() {
     assert_eq!(default.get(Slot::Search), theme.get(Slot::Search));
     assert_eq!(default.get(Slot::SearchCurrent), theme.get(Slot::SearchCurrent));
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn theme_warnings_carry_the_theme_name() {
+    let dir = temp_dir("source");
+    write(&dir, "odd.theme", "style cell fg red\nbogus\n");
+    let (_, w) = resolve(Some("odd"), None, Some(&dir));
+    assert_eq!(1, w.len());
+    assert_eq!("odd", w[0].source);
+    assert_eq!(2, w[0].line);
+    assert_eq!("odd:2: unknown line type 'bogus'", w[0].to_string());
 }

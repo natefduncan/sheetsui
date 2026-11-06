@@ -2238,11 +2238,7 @@ impl<'ws> Workspace<'ws> {
         if !self.state.theme_warnings.is_empty() {
             text.push_str("\n## Warnings\n\n");
             for w in &self.state.theme_warnings {
-                if w.line == 0 {
-                    text.push_str(&format!("* {}\n", w.msg));
-                } else {
-                    text.push_str(&format!("* line {}: {}\n", w.line, w.msg));
-                }
+                text.push_str(&format!("* {w}\n"));
             }
         }
         text.push_str("\nType `theme <name>` to switch.\n");

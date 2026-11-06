@@ -9,9 +9,9 @@ use super::{command, map::KeyMap};
 ///
 /// Blank lines and lines starting with `#` are skipped. A leading `:` is
 /// optional. A line that is not a mapping command, does not parse, or cannot
-/// be applied is skipped and reported with its 1-based line number. The lines
+/// be applied is skipped and reported with `source` and its 1-based line number. The lines
 /// after it still run.
-pub fn load(text: &str, keymap: &mut KeyMap) -> Vec<Warning> {
+pub fn load(text: &str, source: &str, keymap: &mut KeyMap) -> Vec<Warning> {
     let mut warnings = Vec::new();
     for (idx, raw) in text.lines().enumerate() {
         let line = idx + 1;
@@ -28,10 +28,21 @@ pub fn load(text: &str, keymap: &mut KeyMap) -> Vec<Warning> {
             Err(msg) => Err(msg),
         };
         if let Err(msg) = result {
-            warnings.push(Warning { line, msg });
+            warnings.push(Warning {
+                source: source.to_owned(),
+                line,
+                msg,
+            });
         }
     }
     warnings
+}
+
+/// The name a file goes by in warnings: its file name.
+fn source_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
 }
 
 /// What loading the keys file found.
@@ -56,7 +67,7 @@ pub fn load_file(flag: Option<&Path>, config_dir: Option<&Path>, keymap: &mut Ke
     };
     match std::fs::read_to_string(&path) {
         Ok(text) => {
-            let warnings = load(&text, keymap);
+            let warnings = load(&text, &source_name(&path), keymap);
             Loaded {
                 path: Some(path),
                 warnings,
@@ -65,9 +76,14 @@ pub fn load_file(flag: Option<&Path>, config_dir: Option<&Path>, keymap: &mut Ke
         Err(e) if !named && e.kind() == std::io::ErrorKind::NotFound => Loaded::default(),
         Err(e) => {
             let msg = format!("cannot read {}: {e}", path.display());
+            let source = source_name(&path);
             Loaded {
                 path: Some(path),
-                warnings: vec![Warning { line: 0, msg }],
+                warnings: vec![Warning {
+                    source,
+                    line: 0,
+                    msg,
+                }],
             }
         }
     }

@@ -176,6 +176,7 @@ fn warns(text: &str) -> Vec<Warning> {
 
 fn w(line: usize, msg: &str) -> Warning {
     Warning {
+        source: String::new(),
         line,
         msg: msg.to_owned(),
     }
@@ -251,4 +252,16 @@ fn unset_slots_keep_the_base() {
         Style::default().fg(Color::Red).bg(Color::Rgb(35, 33, 54)),
         theme.get(Slot::Cell)
     );
+}
+
+#[test]
+fn warning_display_shows_source_and_line() {
+    let w = |source: &str, line| Warning {
+        source: source.to_owned(),
+        line,
+        msg: "bad".to_owned(),
+    };
+    assert_eq!("keys:7: bad", w("keys", 7).to_string());
+    assert_eq!("keys: bad", w("keys", 0).to_string());
+    assert_eq!("line 7: bad", w("", 7).to_string());
 }

@@ -1126,7 +1126,7 @@ fn test_nmap_with_nothing_says_so_and_shows_load_warnings() {
     run_command(&mut ws, "nmap");
     let text = popup_text(&ws);
     assert!(text.contains("No mappings"), "{text}");
-    assert!(text.contains("line 2:"), "{text}");
+    assert!(text.contains("keys:2:"), "{text}");
     assert!(text.contains("not a key name"), "{text}");
     assert!(text.contains(&dir.join("keys").display().to_string()), "{text}");
 }
@@ -3191,7 +3191,7 @@ fn test_theme_cmd_lists_builtin_and_user_themes() {
         .map(|l| l.to_string())
         .collect::<Vec<_>>()
         .join("\n");
-    for needle in ["default", "light", "terminal", "mine", "current", "line 1:"] {
+    for needle in ["default", "light", "terminal", "mine", "current", "mine:1:"] {
         assert!(text.contains(needle), "{needle} missing from:\n{text}");
     }
 }

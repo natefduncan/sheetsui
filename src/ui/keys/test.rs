@@ -728,7 +728,7 @@ fn nmap_and_vmap_list() {
 
 fn load(text: &str) -> (KeyMap, Vec<(usize, String)>) {
     let mut map = KeyMap::default();
-    let warnings = file::load(text, &mut map)
+    let warnings = file::load(text, "keys", &mut map)
         .into_iter()
         .map(|w| (w.line, w.msg))
         .collect();
@@ -874,7 +874,7 @@ fn the_listing_says_when_there_is_nothing() {
 #[test]
 fn the_listing_shows_mappings_unmapped_keys_and_warnings() {
     let (mut map, warnings) = load("nnoremap <Space>c yj\nnunmap q\nnnoremap <Nope> j\n");
-    map.warnings = file::load("nnoremap <Nope> j\n", &mut KeyMap::default());
+    map.warnings = file::load("nnoremap <Nope> j\n", "keys", &mut KeyMap::default());
     map.loaded_from = Some(std::path::PathBuf::from("/home/me/.config/sheetui/keys"));
     assert_eq!(1, warnings.len());
     let text = listing_text(MapMode::Navigate, &map);
@@ -882,7 +882,7 @@ fn the_listing_shows_mappings_unmapped_keys_and_warnings() {
     assert!(text.contains("* `q` \u{2192} (unmapped)"), "{text}");
     assert!(text.contains("Keys file: /home/me/.config/sheetui/keys"), "{text}");
     assert!(text.contains("## Warnings"), "{text}");
-    assert!(text.contains("line 1:"), "{text}");
+    assert!(text.contains("keys:1:"), "{text}");
     assert!(!text.contains("No mappings"), "{text}");
     // The other mode has no mappings, but the same warnings.
     let text = listing_text(MapMode::RangeSelect, &map);
@@ -1215,4 +1215,22 @@ fn search_group_lists_every_search_key() {
     for key in ["`/`", "`?`", "`n`", "`N`"] {
         assert!(out.contains(key), "{key} missing from {out}");
     }
+}
+
+#[test]
+fn key_warnings_carry_their_source() {
+    let mut map = KeyMap::default();
+    let warnings = file::load("nnoremap a j\nbogus\n", "mykeys", &mut map);
+    assert_eq!(1, warnings.len());
+    assert_eq!("mykeys", warnings[0].source);
+    assert!(warnings[0].to_string().starts_with("mykeys:2: "), "{}", warnings[0]);
+}
+
+#[test]
+fn unreadable_flag_file_warns_with_its_file_name() {
+    let mut map = KeyMap::default();
+    let path = std::path::Path::new("/no/such/dir/my.keys");
+    let loaded = file::load_file(Some(path), None, &mut map);
+    assert_eq!("my.keys", loaded.warnings[0].source);
+    assert_eq!(0, loaded.warnings[0].line);
 }

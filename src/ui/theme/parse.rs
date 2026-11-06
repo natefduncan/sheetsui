@@ -9,9 +9,38 @@ use super::{color::parse_color, Slot, Theme};
 /// A problem found while parsing a theme file.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Warning {
-    /// 1-based line number.
+    /// Where it came from: a file name or theme name. `parse` leaves it empty
+    /// for the caller, which knows the file, to fill in.
+    pub source: String,
+    /// 1-based line number, or 0 for a problem with the file as a whole.
     pub line: usize,
     pub msg: String,
+}
+
+impl Warning {
+    /// Sets the source of every warning in `warnings`.
+    pub fn with_source(mut warnings: Vec<Warning>, source: &str) -> Vec<Warning> {
+        for w in &mut warnings {
+            w.source = source.to_owned();
+        }
+        warnings
+    }
+}
+
+impl std::fmt::Display for Warning {
+    /// `source:line: msg`, or `source: msg` when there is no line.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if !self.source.is_empty() {
+            write!(f, "{}", self.source)?;
+            if self.line != 0 {
+                write!(f, ":{}", self.line)?;
+            }
+            write!(f, ": ")?;
+        } else if self.line != 0 {
+            write!(f, "line {}: ", self.line)?;
+        }
+        write!(f, "{}", self.msg)
+    }
 }
 
 /// Parses `text` on top of `base`. A slot the text does not set keeps `base`'s style.
@@ -25,7 +54,7 @@ pub fn parse(text: &str, base: &Theme) -> (Theme, Vec<Warning>) {
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let mut warn = |msg: String| warnings.push(Warning { line, msg });
+        let mut warn = |msg: String| warnings.push(Warning { source: String::new(), line, msg });
         let tokens: Vec<&str> = trimmed.split_whitespace().collect();
         match tokens[0] {
             "palette" => {
