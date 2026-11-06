@@ -6152,3 +6152,88 @@ fn test_decimals_cmd_bad_argument_shows_usage() {
     assert!(popup_text(&ws).contains("Usage: decimals <+n|-n|n>"));
     assert_eq!("General", fmt_of(&ws, 1, 1));
 }
+
+#[test]
+fn test_alt_preset_keys_format_cursor_cell() {
+    let cases = [
+        ('1', "0.00"), ('2', "hh:mm:ss"), ('3', "yyyy-mm-dd"), ('4', "$#,##0.00"),
+        ('5', "0.00%"), ('6', "0.00E+00"), ('0', "General"),
+    ];
+    for (key, code) in cases {
+        let mut ws = new_workspace();
+        run_command(&mut ws, "format percent");
+        script().alt(key).run(&mut ws).expect("script");
+        assert_eq!(code, fmt_of(&ws, 1, 1), "<A-{key}>");
+        assert_eq!("General", fmt_of(&ws, 2, 1));
+    }
+    let mut ws = new_workspace();
+    script().alt('4').run(&mut ws).expect("script");
+    assert_eq!(Some("Format currency: 1 cell".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_alt_preset_key_in_range_select_formats_selection_in_one_undo() {
+    let mut ws = new_workspace();
+    script().char('v').chars("jjll").alt('5').run(&mut ws).expect("script");
+    for r in 1..=3 {
+        for c in 1..=3 {
+            assert_eq!("0.00%", fmt_of(&ws, r, c), "{r}:{c}");
+        }
+    }
+    assert_eq!("General", fmt_of(&ws, 4, 4));
+    assert_eq!(Some("Format percent: 9 cells".to_owned()), last_message(&ws));
+    run_command(&mut ws, "undo");
+    assert_eq!("General", fmt_of(&ws, 1, 1));
+}
+
+#[test]
+fn test_alt_decimal_keys_in_both_modes() {
+    let mut ws = new_workspace();
+    script().alt('.').run(&mut ws).expect("script");
+    assert_eq!("0.0", fmt_of(&ws, 1, 1));
+    assert_eq!(Some("Decimals +1: 1 cell".to_owned()), last_message(&ws));
+    script().alt('.').alt(',').alt(',').run(&mut ws).expect("script");
+    assert_eq!("0", fmt_of(&ws, 1, 1));
+    script().char('v').char('j').alt('.').run(&mut ws).expect("script");
+    assert_eq!("0.0", fmt_of(&ws, 1, 1));
+    assert_eq!("0.0", fmt_of(&ws, 2, 1));
+    assert_eq!(Some("Decimals +1: 2 cells".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_alt_decimal_key_refusal_changes_nothing() {
+    let mut ws = new_workspace();
+    script().alt('3').alt('.').run(&mut ws).expect("script");
+    assert_eq!("yyyy-mm-dd", fmt_of(&ws, 1, 1));
+    assert_eq!(Some("Cannot change decimals of yyyy-mm-dd".to_owned()), last_message(&ws));
+    assert_eq!(super::MessageLevel::Error, ws.state.message.as_ref().unwrap().level);
+}
+
+#[test]
+fn test_plain_digit_is_still_a_numeric_prefix_beside_alt_digit() {
+    let mut ws = new_workspace();
+    script().chars("3j").run(&mut ws).expect("script");
+    assert_eq!(4, ws.book.location.row);
+    assert_eq!("General", fmt_of(&ws, 1, 1));
+}
+
+#[test]
+fn test_alt_format_keys_can_be_remapped_and_unmapped() {
+    let mut ws = new_workspace();
+    type_command(&mut ws, "nunmap <A-5>");
+    script().alt('5').run(&mut ws).expect("script");
+    assert_eq!("General", fmt_of(&ws, 1, 1));
+    type_command(&mut ws, "nnoremap Q <A-4>");
+    script().char('Q').run(&mut ws).expect("script");
+    assert_eq!("$#,##0.00", fmt_of(&ws, 1, 1));
+}
+
+#[test]
+fn test_alt_format_keys_are_in_the_help() {
+    let mut ws = new_workspace();
+    script().alt('h').run(&mut ws).expect("script");
+    let help = popup_text(&ws);
+    for k in ["<A-1>", "<A-5>", "<A-0>", "<A-.>", "<A-,>"] {
+        assert!(help.contains(k), "{k} missing from help");
+    }
+}

@@ -1119,6 +1119,15 @@ impl<'ws> Workspace<'ws> {
 
     fn run_range_handler(&mut self, handler: RangeHandler) -> Result<Option<ExitCode>> {
         match handler {
+            RangeHandler::FormatNumber => self.format_cells(Some("number")),
+            RangeHandler::FormatTime => self.format_cells(Some("time")),
+            RangeHandler::FormatDate => self.format_cells(Some("date")),
+            RangeHandler::FormatCurrency => self.format_cells(Some("currency")),
+            RangeHandler::FormatPercent => self.format_cells(Some("percent")),
+            RangeHandler::FormatScientific => self.format_cells(Some("scientific")),
+            RangeHandler::FormatGeneral => self.format_cells(Some("general")),
+            RangeHandler::DecimalsMore => self.change_decimals(book::DecimalsChange::Add(1)),
+            RangeHandler::DecimalsLess => self.change_decimals(book::DecimalsChange::Add(-1)),
             RangeHandler::Help => {
                 self.enter_dialog_mode(self.render_help_text());
             }
@@ -1428,6 +1437,15 @@ impl<'ws> Workspace<'ws> {
             NavHandler::Paste => {
                 self.paste_range()?;
             }
+            NavHandler::FormatNumber => self.format_cells(Some("number")),
+            NavHandler::FormatTime => self.format_cells(Some("time")),
+            NavHandler::FormatDate => self.format_cells(Some("date")),
+            NavHandler::FormatCurrency => self.format_cells(Some("currency")),
+            NavHandler::FormatPercent => self.format_cells(Some("percent")),
+            NavHandler::FormatScientific => self.format_cells(Some("scientific")),
+            NavHandler::FormatGeneral => self.format_cells(Some("general")),
+            NavHandler::DecimalsMore => self.change_decimals(book::DecimalsChange::Add(1)),
+            NavHandler::DecimalsLess => self.change_decimals(book::DecimalsChange::Add(-1)),
             NavHandler::Help => {
                 self.enter_dialog_mode(self.render_help_text());
             }
