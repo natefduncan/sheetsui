@@ -39,7 +39,7 @@ pub fn load(text: &str, source: &str, keymap: &mut KeyMap) -> Vec<Warning> {
 }
 
 /// The name a file goes by in warnings: its file name.
-fn source_name(path: &Path) -> String {
+pub fn source_name(path: &Path) -> String {
     path.file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| path.display().to_string())

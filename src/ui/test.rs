@@ -1087,12 +1087,77 @@ fn test_a_missing_keys_flag_file_is_a_warning_not_a_crash() {
 }
 
 #[test]
-fn test_init_keys_clears_earlier_mappings() {
+fn test_init_config_clears_earlier_mappings() {
     let dir = temp_config_dir("keys-reset");
     let mut ws = new_workspace();
     map_nav(&mut ws, "z", "jj");
-    ws.init_keys_from(None, Some(dir));
+    ws.init_config_from(Some(dir));
     assert!(ws.state.keymap.nav.is_empty());
+}
+
+#[test]
+fn test_init_config_set_lines_start_the_session_with_those_options() {
+    let dir = temp_config_dir("config-set");
+    std::fs::write(dir.join("config"), "set ic scs\nset searchin=raw\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_config_from(Some(dir));
+    assert_eq!(None, message_text(&ws));
+    assert!(ws.state.options.ignorecase());
+    assert!(ws.state.options.smartcase());
+    run_command(&mut ws, "set ic?");
+    assert_eq!(Some("ignorecase".to_owned()), message_text(&ws));
+}
+
+#[test]
+fn test_config_mapping_loses_to_a_keys_mapping_for_the_same_keys() {
+    let dir = temp_config_dir("config-keys");
+    std::fs::write(dir.join("config"), "nnoremap <Space> jj\nnnoremap a l\n").unwrap();
+    std::fs::write(dir.join("keys"), "nnoremap <Space> jjj\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_config_from(Some(dir.clone()));
+    ws.init_keys_from(None, Some(dir));
+    assert_eq!(2, ws.state.keymap.nav.mappings().len());
+    let row = ws.book.location.row;
+    script().char(' ').run(&mut ws).expect("Failed to run script");
+    assert_eq!(row + 3, ws.book.location.row);
+    let col = ws.book.location.col;
+    script().char('a').run(&mut ws).expect("Failed to run script");
+    assert_eq!(col + 1, ws.book.location.col);
+}
+
+#[test]
+fn test_config_warnings_are_counted_and_listed_by_nmap() {
+    let dir = temp_config_dir("config-warn");
+    std::fs::write(dir.join("config"), "write x\nset foo\nset ic\n").unwrap();
+    std::fs::write(dir.join("keys"), "nnoremap 1 j\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_config_from(Some(dir.clone()));
+    assert!(ws.state.options.ignorecase(), "later lines still run");
+    assert_eq!(
+        Some("keys: 2 warnings (:nmap to list)".to_owned()),
+        message_text(&ws)
+    );
+    ws.init_keys_from(None, Some(dir));
+    assert_eq!(
+        Some("keys: 3 warnings (:nmap to list)".to_owned()),
+        message_text(&ws)
+    );
+    run_command(&mut ws, "nmap");
+    let text = popup_text(&ws);
+    assert!(text.contains("config:1:"), "{text}");
+    assert!(text.contains("config:2:"), "{text}");
+    assert!(text.contains("keys:1:"), "{text}");
+}
+
+#[test]
+fn test_config_with_theme_or_unrelated_lines_still_loads_the_theme() {
+    let dir = temp_config_dir("config-theme");
+    std::fs::write(dir.join("config"), "other 1\ntheme terminal\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_config_from(Some(dir.clone()));
+    ws.init_theme_from(None, Some(dir));
+    assert_eq!("terminal", ws.state.theme.name);
+    assert_eq!(1, ws.state.keymap.warnings.len());
 }
 
 #[test]

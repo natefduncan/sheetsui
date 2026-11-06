@@ -20,6 +20,7 @@ use tui_prompts::{State, Status, TextPrompt, TextState};
 use ratatui_textarea::{CursorMove, TextArea};
 
 mod cmd;
+mod config;
 mod help;
 mod history;
 mod options;
@@ -2209,12 +2210,37 @@ impl<'ws> Workspace<'ws> {
     }
 
     fn init_keys_from(&mut self, flag: Option<&Path>, config_dir: Option<PathBuf>) {
+        let loaded = keys::file::load_file(flag, config_dir.as_deref(), &mut self.state.keymap);
+        self.state.keymap.loaded_from = loaded.path;
+        self.state.keymap.warnings.extend(loaded.warnings);
+        self.report_key_warnings();
+    }
+
+    /// Loads the `config` file from the config directory: `set` lines into the
+    /// options and mappings into the key map. Starts the key map from the
+    /// built-ins, so call it before `init_keys`. Never fails: a problem is a
+    /// warning, counted on the message line and listed by `:nmap`.
+    pub fn init_config(&mut self) {
+        self.init_config_from(lookup::config_dir());
+    }
+
+    fn init_config_from(&mut self, config_dir: Option<PathBuf>) {
         self.state.keymap.nav = Default::default();
         self.state.keymap.range = Default::default();
-        let loaded = keys::file::load_file(flag, config_dir.as_deref(), &mut self.state.keymap);
-        let count = loaded.warnings.len();
-        self.state.keymap.loaded_from = loaded.path;
+        self.state.keymap.warnings.clear();
+        self.state.keymap.loaded_from = None;
+        let loaded = config::load_file(
+            config_dir.as_deref(),
+            &mut self.state.options,
+            &mut self.state.keymap,
+        );
         self.state.keymap.warnings = loaded.warnings;
+        self.report_key_warnings();
+    }
+
+    /// Counts the startup warnings so far on the message line.
+    fn report_key_warnings(&mut self) {
+        let count = self.state.keymap.warnings.len();
         if count > 0 {
             let plural = if count == 1 { "" } else { "s" };
             self.set_message(
