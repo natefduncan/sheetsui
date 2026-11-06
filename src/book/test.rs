@@ -5,7 +5,7 @@ use crate::ui::Address;
 use super::{
     shrink_freeze,
     search::{Direction, SearchIn},
-    change_decimals, check_number_format, number_format_preset, DecimalsChange, AutofitReport, Book, FileFormat, DEFAULT_COL_WIDTH, LAST_COLUMN, LAST_ROW,
+    change_decimals, check_number_format, StyleAttr, StyleFlag, number_format_preset, DecimalsChange, AutofitReport, Book, FileFormat, DEFAULT_COL_WIDTH, LAST_COLUMN, LAST_ROW,
 };
 use ironcalc::base::UserModel;
 
@@ -2684,4 +2684,123 @@ fn test_full_column_style_merges_one_path_into_cells_with_a_style() {
     // A cell with no style of its own gets the column's.
     let s = book.get_cell_style(&phase2_addr(2, 1)).expect("style");
     assert!(s.font.b);
+}
+
+fn flags_of(book: &Book, row: usize, col: usize) -> (bool, bool, bool, bool) {
+    let a = phase2_addr(row, col);
+    (
+        book.cell_has_style(&a, StyleFlag::Bold),
+        book.cell_has_style(&a, StyleFlag::Italic),
+        book.cell_has_style(&a, StyleFlag::Underline),
+        book.cell_has_style(&a, StyleFlag::Strike),
+    )
+}
+
+#[test]
+fn test_apply_style_each_flag_on_a_cell_and_a_range() {
+    let mut book = Book::default();
+    book.update_cell(&phase2_addr(1, 1), "text").expect("set");
+    for (i, flag) in [StyleFlag::Bold, StyleFlag::Italic, StyleFlag::Underline, StyleFlag::Strike].into_iter().enumerate() {
+        book.apply_style(&fmt_area(1, 1, 1, 1), &[StyleAttr::Toggle(flag)]).expect("style");
+        let f = flags_of(&book, 1, 1);
+        assert_eq!([f.0, f.1, f.2, f.3].iter().filter(|b| **b).count(), i + 1);
+    }
+    // A range, including empty cells.
+    book.apply_style(&fmt_area(3, 3, 3, 3), &[StyleAttr::Toggle(StyleFlag::Underline)]).expect("style");
+    for r in 3..=5 {
+        for c in 3..=5 {
+            assert!(book.cell_has_style(&phase2_addr(r, c), StyleFlag::Underline), "{r}:{c}");
+        }
+    }
+    assert!(!book.cell_has_style(&phase2_addr(6, 6), StyleFlag::Underline));
+}
+
+#[test]
+fn test_apply_style_toggle_is_decided_by_first_cell_and_ends_uniform() {
+    let mut book = Book::default();
+    // Second cell bold, first not: the area gains bold.
+    book.apply_style(&fmt_area(1, 2, 1, 1), &[StyleAttr::Toggle(StyleFlag::Bold)]).expect("style");
+    let done = book.apply_style(&fmt_area(1, 1, 3, 1), &[StyleAttr::Toggle(StyleFlag::Bold)]).expect("style");
+    assert_eq!(vec![(StyleFlag::Bold, true)], done);
+    for c in 1..=3 {
+        assert!(book.cell_has_style(&phase2_addr(1, c), StyleFlag::Bold), "{c}");
+    }
+    // First cell bold now: the area loses it.
+    let done = book.apply_style(&fmt_area(1, 1, 3, 1), &[StyleAttr::Toggle(StyleFlag::Bold)]).expect("style");
+    assert_eq!(vec![(StyleFlag::Bold, false)], done);
+    for c in 1..=3 {
+        assert!(!book.cell_has_style(&phase2_addr(1, c), StyleFlag::Bold), "{c}");
+    }
+    // Only the first cell decides, not any other.
+    book.apply_style(&fmt_area(1, 1, 1, 1), &[StyleAttr::Toggle(StyleFlag::Italic)]).expect("style");
+    book.apply_style(&fmt_area(1, 1, 3, 1), &[StyleAttr::Toggle(StyleFlag::Italic)]).expect("style");
+    for c in 1..=3 {
+        assert!(!book.cell_has_style(&phase2_addr(1, c), StyleFlag::Italic), "{c}");
+    }
+}
+
+#[test]
+fn test_apply_style_set_ignores_current_state_and_keeps_other_attributes() {
+    let mut book = Book::default();
+    book.set_cell_style(&[("fill.color", "#FF0000")], &fmt_area(1, 1, 1, 1)).expect("fill");
+    book.set_number_format("0.00", &fmt_area(1, 1, 1, 1)).expect("fmt");
+    book.apply_style(&fmt_area(1, 1, 1, 1), &[StyleAttr::Set(StyleFlag::Bold, false)]).expect("style");
+    assert!(!book.cell_has_style(&phase2_addr(1, 1), StyleFlag::Bold));
+    book.apply_style(&fmt_area(1, 1, 1, 1), &[StyleAttr::Set(StyleFlag::Bold, true), StyleAttr::Toggle(StyleFlag::Strike)]).expect("style");
+    assert_eq!((true, false, false, true), flags_of(&book, 1, 1));
+    let style = book.get_cell_style(&phase2_addr(1, 1)).expect("style");
+    assert_eq!("0.00", style.num_fmt);
+    assert!(!style.fill.color.is_none());
+}
+
+#[test]
+fn test_apply_style_several_attributes_one_undo_step() {
+    let mut book = Book::default();
+    book.apply_style(
+        &fmt_area(1, 1, 2, 2),
+        &[StyleAttr::Toggle(StyleFlag::Bold), StyleAttr::Toggle(StyleFlag::Underline)],
+    ).expect("style");
+    assert_eq!((true, false, true, false), flags_of(&book, 2, 2));
+    book.undo().expect("undo");
+    assert_eq!((false, false, false, false), flags_of(&book, 1, 1));
+    assert_eq!((false, false, false, false), flags_of(&book, 2, 2));
+}
+
+#[test]
+fn test_style_round_trips_through_sui_and_xlsx() {
+    for ext in ["sui", "xlsx"] {
+        let path = tmp_path(&format!("style_round_trip.{ext}"));
+        let mut book = Book::default();
+        book.update_cell(&phase2_addr(1, 1), "x").expect("set");
+        book.apply_style(
+            &fmt_area(1, 1, 1, 1),
+            &[
+                StyleAttr::Toggle(StyleFlag::Bold),
+                StyleAttr::Toggle(StyleFlag::Italic),
+                StyleAttr::Toggle(StyleFlag::Underline),
+                StyleAttr::Toggle(StyleFlag::Strike),
+            ],
+        ).expect("style");
+        book.save_as(&path).expect("save");
+        let loaded = Book::load(&path, "en", "America/New_York").expect("load");
+        assert_eq!((true, true, true, true), flags_of(&loaded, 1, 1), "{ext}");
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+#[test]
+fn test_apply_style_never_changes_column_width() {
+    let mut book = Book::default();
+    book.update_cell(&phase2_addr(1, 1), "hello").expect("set");
+    let width = book.get_col_size(1).unwrap();
+    book.apply_style(&fmt_area(1, 1, 1, 3), &[StyleAttr::Toggle(StyleFlag::Bold)]).expect("style");
+    assert_eq!(width, book.get_col_size(1).unwrap());
+}
+
+#[test]
+fn test_typing_into_a_styled_empty_cell_keeps_its_style() {
+    let mut book = Book::default();
+    book.apply_style(&fmt_area(2, 2, 1, 1), &[StyleAttr::Toggle(StyleFlag::Bold)]).expect("style");
+    book.update_cell(&phase2_addr(2, 2), "typed").expect("set");
+    assert!(book.cell_has_style(&phase2_addr(2, 2), StyleFlag::Bold));
 }

@@ -2,7 +2,7 @@
 use ironcalc::base::expressions::utils::{column_to_number, is_valid_column};
 use slice_utils::{Measured, Peekable, Seekable, Span, StrCursor};
 
-use crate::book::{DecimalsChange, FillDirection, MAX_DECIMALS};
+use crate::book::{DecimalsChange, FillDirection, StyleAttr, StyleFlag, MAX_DECIMALS};
 use crate::book::substitute::{is_delimiter, Scope};
 
 /// A parsed command entered in during command mode.
@@ -34,6 +34,10 @@ pub enum Cmd<'a> {
     /// `None` when not written.
     FormatCols(Option<usize>, &'a str),
     FormatRows(Option<usize>, &'a str),
+    /// `:style <attr>...` and its one-word aliases `:bold`, `:italic`,
+    /// `:underline` and `:strike`: the attribute words, still to parse with
+    /// [`parse_style_attrs`].
+    Style(&'a str),
     /// `:decimals <+n|-n|n>`: add, remove or set decimal places.
     Decimals(DecimalsChange),
     RenameSheet(Option<usize>, &'a str),
@@ -177,6 +181,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_format_span(cursor.clone(), "format-rows")? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_style(cursor.clone())? {
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_decimals(cursor.clone())? {
@@ -346,6 +353,79 @@ fn try_consume_format<'cmd, 'i: 'cmd>(
     // spaces and quotes.
     let arg = input.span(0..).trim();
     Ok(Some(Cmd::Format(if arg.is_empty() { None } else { Some(arg) })))
+}
+
+/// `style <attr>...` and the aliases `bold`, `italic`, `underline`, `strike`.
+fn try_consume_style<'cmd, 'i: 'cmd>(
+    input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const USAGE: &str = "Usage: style <attr>...";
+    for alias in ["bold", "italic", "underline", "strike"] {
+        if let Some(rest) = command_args(&input, alias) {
+            if !rest.is_empty() {
+                return Err(match alias {
+                    "bold" => "Usage: bold",
+                    "italic" => "Usage: italic",
+                    "underline" => "Usage: underline",
+                    _ => "Usage: strike",
+                });
+            }
+            return Ok(Some(Cmd::Style(alias)));
+        }
+    }
+    let Some(rest) = command_args(&input, "style") else {
+        return Ok(None);
+    };
+    if rest.is_empty() {
+        return Err(USAGE);
+    }
+    Ok(Some(Cmd::Style(rest)))
+}
+
+/// The trimmed text after command `name` when the input is that command
+/// followed by whitespace or nothing, else `None`.
+fn command_args<'i>(input: &StrCursor<'i>, name: &str) -> Option<&'i str> {
+    if !compare(input.clone(), name) {
+        return None;
+    }
+    let mut rest = input.clone();
+    rest.seek(name.len());
+    if rest.remaining() > 0 && !is_ws(&mut rest) {
+        return None;
+    }
+    Some(rest.span(0..).trim())
+}
+
+/// Parse the words of a `:style` command. A toggle word (`bold`, `italic`,
+/// `underline`, `strike`) flips from the deciding cell, `no<word>` clears.
+/// An unknown word is `Unknown style: <word>`; the same attribute twice is an
+/// error rather than last-one-wins.
+pub fn parse_style_attrs(text: &str) -> Result<Vec<StyleAttr>, String> {
+    let mut attrs: Vec<StyleAttr> = Vec::new();
+    for word in text.split_whitespace() {
+        let attr = match word {
+            "bold" => StyleAttr::Toggle(StyleFlag::Bold),
+            "italic" => StyleAttr::Toggle(StyleFlag::Italic),
+            "underline" => StyleAttr::Toggle(StyleFlag::Underline),
+            "strike" => StyleAttr::Toggle(StyleFlag::Strike),
+            "nobold" => StyleAttr::Set(StyleFlag::Bold, false),
+            "noitalic" => StyleAttr::Set(StyleFlag::Italic, false),
+            "nounderline" => StyleAttr::Set(StyleFlag::Underline, false),
+            "nostrike" => StyleAttr::Set(StyleFlag::Strike, false),
+            _ => return Err(format!("Unknown style: {word}")),
+        };
+        let flag = match attr {
+            StyleAttr::Toggle(f) | StyleAttr::Set(f, _) => f,
+        };
+        if attrs.iter().any(|a| matches!(a, StyleAttr::Toggle(f) | StyleAttr::Set(f, _) if *f == flag)) {
+            return Err(format!("Repeated style: {}", flag.word()));
+        }
+        attrs.push(attr);
+    }
+    if attrs.is_empty() {
+        return Err("Usage: style <attr>...".to_string());
+    }
+    Ok(attrs)
 }
 
 fn try_consume_decimals<'cmd, 'i: 'cmd>(

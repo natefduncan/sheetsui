@@ -70,6 +70,47 @@ pub enum DecimalsChange {
     Set(usize),
 }
 
+/// A font attribute `:style` can switch on or off.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StyleFlag {
+    Bold,
+    Italic,
+    Underline,
+    Strike,
+}
+
+impl StyleFlag {
+    /// The ironcalc style path.
+    fn path(self) -> &'static str {
+        match self {
+            StyleFlag::Bold => "font.b",
+            StyleFlag::Italic => "font.i",
+            StyleFlag::Underline => "font.u",
+            StyleFlag::Strike => "font.strike",
+        }
+    }
+
+    /// The word used in `:style` and in messages.
+    pub fn word(self) -> &'static str {
+        match self {
+            StyleFlag::Bold => "bold",
+            StyleFlag::Italic => "italic",
+            StyleFlag::Underline => "underline",
+            StyleFlag::Strike => "strike",
+        }
+    }
+}
+
+/// One attribute of a `:style` command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StyleAttr {
+    /// Decided once from the first cell of the area: if it has the
+    /// attribute the area loses it, else the area gets it.
+    Toggle(StyleFlag),
+    /// Switch the attribute on or off whatever the cells have now.
+    Set(StyleFlag, bool),
+}
+
 /// The most decimal places `:decimals` will make.
 pub const MAX_DECIMALS: usize = 15;
 
@@ -993,6 +1034,40 @@ impl Book {
             book.dirty = true;
             Ok(())
         })
+    }
+
+    /// Whether a cell has a font attribute.
+    pub fn cell_has_style(&self, cell: &Address, flag: StyleFlag) -> bool {
+        self.get_cell_style(cell).is_some_and(|s| match flag {
+            StyleFlag::Bold => s.font.b,
+            StyleFlag::Italic => s.font.i,
+            StyleFlag::Underline => s.font.u,
+            StyleFlag::Strike => s.font.strike,
+        })
+    }
+
+    /// Apply font attributes to every cell in `area`, empty cells included,
+    /// as one undo step. Toggles are decided once from the area's first
+    /// cell. Returns what was applied: each attribute and whether it is now on.
+    pub fn apply_style(&mut self, area: &Area, attrs: &[StyleAttr]) -> Result<Vec<(StyleFlag, bool)>> {
+        let first = Address {
+            sheet: area.sheet,
+            row: area.row as usize,
+            col: area.column as usize,
+        };
+        let done: Vec<(StyleFlag, bool)> = attrs
+            .iter()
+            .map(|attr| match *attr {
+                StyleAttr::Toggle(flag) => (flag, !self.cell_has_style(&first, flag)),
+                StyleAttr::Set(flag, on) => (flag, on),
+            })
+            .collect();
+        let style: Vec<(&str, &str)> = done
+            .iter()
+            .map(|(flag, on)| (flag.path(), if *on { "true" } else { "false" }))
+            .collect();
+        self.set_cell_style(&style, area)?;
+        Ok(done)
     }
 
     /// Set the number format of every cell in `area`, empty and text cells

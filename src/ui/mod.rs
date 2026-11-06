@@ -1032,6 +1032,10 @@ impl<'ws> Workspace<'ws> {
                 self.format_cells(arg);
                 Ok(None)
             }
+            Ok(Some(Cmd::Style(words))) => {
+                self.style_cells(words);
+                Ok(None)
+            }
             Ok(Some(Cmd::Decimals(change))) => {
                 self.change_decimals(change);
                 Ok(None)
@@ -1748,6 +1752,26 @@ impl<'ws> Workspace<'ws> {
                 let what = if cells == 1 { "1 cell".to_string() } else { format!("{cells} cells") };
                 let name = if preset.is_some() { arg.to_lowercase() } else { arg.to_string() };
                 self.set_message(MessageLevel::Info, format!("Format {name}: {what}"));
+            }
+            Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
+        }
+    }
+
+    /// `:style <attr>...` and its aliases, on the cursor cell or selection.
+    fn style_cells(&mut self, words: &str) {
+        if self.in_cell_edit_range_select() {
+            return;
+        }
+        let attrs = match cmd::parse_style_attrs(words) {
+            Ok(attrs) => attrs,
+            Err(e) => return self.set_message(MessageLevel::Error, e),
+        };
+        let area = self.target_area();
+        match self.book.apply_style(&area, &attrs) {
+            Ok(done) => {
+                let cells = area.width * area.height;
+                let what = if cells == 1 { "1 cell".to_string() } else { format!("{cells} cells") };
+                self.set_message(MessageLevel::Info, format!("{}: {what}", style_summary(&done)));
             }
             Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
         }
@@ -2737,5 +2761,24 @@ fn autofit_message(
         format!("Fitted {total} columns")
     } else {
         format!("Fitted {total} columns ({empty} empty, reset to {default})")
+    }
+}
+
+/// What a style command did, for the message line: `Bold`, `Not bold`, or
+/// `Style bold nounderline` for several attributes.
+fn style_summary(done: &[(book::StyleFlag, bool)]) -> String {
+    match done {
+        [(flag, true)] => {
+            let w = flag.word();
+            format!("{}{}", w[..1].to_uppercase(), &w[1..])
+        }
+        [(flag, false)] => format!("Not {}", flag.word()),
+        _ => {
+            let words: Vec<String> = done
+                .iter()
+                .map(|(flag, on)| if *on { flag.word().to_string() } else { format!("no{}", flag.word()) })
+                .collect();
+            format!("Style {}", words.join(" "))
+        }
     }
 }

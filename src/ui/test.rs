@@ -15,7 +15,8 @@ use crate::ui::keys::{
 };
 use crate::ui::{Address, ClipboardContents, Modality};
 
-use super::cmd::{parse, Cmd, CmdSortKey};
+use super::cmd::{parse, parse_style_attrs, Cmd, CmdSortKey};
+use crate::book::{StyleAttr, StyleFlag};
 use super::render::markdown::Markdown;
 use super::{parse_csv_rows, Workspace};
 
@@ -6236,4 +6237,98 @@ fn test_alt_format_keys_are_in_the_help() {
     for k in ["<A-1>", "<A-5>", "<A-0>", "<A-.>", "<A-,>"] {
         assert!(help.contains(k), "{k} missing from help");
     }
+}
+
+fn has_style(ws: &Workspace, row: usize, col: usize, flag: StyleFlag) -> bool {
+    ws.book.cell_has_style(&Address { sheet: ws.book.location.sheet, row, col }, flag)
+}
+
+#[test]
+fn test_style_cmd_parse() {
+    assert_eq!(Cmd::Style("bold underline"), parse("style bold underline").unwrap().unwrap());
+    assert_eq!(Cmd::Style("bold"), parse("bold").unwrap().unwrap());
+    assert_eq!(Cmd::Style("italic"), parse("italic").unwrap().unwrap());
+    assert_eq!(Cmd::Style("underline"), parse("underline").unwrap().unwrap());
+    assert_eq!(Cmd::Style("strike"), parse("strike").unwrap().unwrap());
+    assert_eq!(Err("Usage: style <attr>..."), parse("style"));
+    assert_eq!(Err("Usage: style <attr>..."), parse("style   "));
+    assert_eq!(Err("Usage: bold"), parse("bold now"));
+    // Not these commands: other words that start the same.
+    assert!(parse("bolder").is_err() || parse("bolder").unwrap().is_none());
+}
+
+#[test]
+fn test_parse_style_attrs() {
+    assert_eq!(
+        Ok(vec![
+            StyleAttr::Toggle(StyleFlag::Bold),
+            StyleAttr::Toggle(StyleFlag::Italic),
+            StyleAttr::Toggle(StyleFlag::Underline),
+            StyleAttr::Toggle(StyleFlag::Strike),
+        ]),
+        parse_style_attrs("bold italic underline strike"),
+    );
+    assert_eq!(
+        Ok(vec![
+            StyleAttr::Set(StyleFlag::Bold, false),
+            StyleAttr::Set(StyleFlag::Italic, false),
+            StyleAttr::Set(StyleFlag::Underline, false),
+            StyleAttr::Set(StyleFlag::Strike, false),
+        ]),
+        parse_style_attrs("nobold  noitalic\tnounderline nostrike"),
+    );
+    assert_eq!(Err("Unknown style: shiny".to_string()), parse_style_attrs("bold shiny"));
+    assert_eq!(Err("Unknown style: Bold".to_string()), parse_style_attrs("Bold"));
+    assert_eq!(Err("Repeated style: bold".to_string()), parse_style_attrs("bold nobold"));
+    assert_eq!(Err("Repeated style: bold".to_string()), parse_style_attrs("bold bold"));
+    assert_eq!(Err("Usage: style <attr>...".to_string()), parse_style_attrs(" "));
+}
+
+#[test]
+fn test_style_cmd_cursor_cell_and_message() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "bold");
+    assert!(has_style(&ws, 1, 1, StyleFlag::Bold));
+    assert!(!has_style(&ws, 2, 1, StyleFlag::Bold));
+    assert_eq!(Some("Bold: 1 cell".to_owned()), last_message(&ws));
+    run_command(&mut ws, "bold");
+    assert!(!has_style(&ws, 1, 1, StyleFlag::Bold));
+    assert_eq!(Some("Not bold: 1 cell".to_owned()), last_message(&ws));
+    run_command(&mut ws, "style italic underline");
+    assert!(has_style(&ws, 1, 1, StyleFlag::Italic) && has_style(&ws, 1, 1, StyleFlag::Underline));
+    assert_eq!(Some("Style italic underline: 1 cell".to_owned()), last_message(&ws));
+    run_command(&mut ws, "strike");
+    assert!(has_style(&ws, 1, 1, StyleFlag::Strike));
+    run_command(&mut ws, "style nostrike noitalic");
+    assert!(!has_style(&ws, 1, 1, StyleFlag::Strike) && !has_style(&ws, 1, 1, StyleFlag::Italic));
+    assert_eq!(Some("Style nostrike noitalic: 1 cell".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_style_cmd_range_select_decided_by_first_cell_one_undo() {
+    let mut ws = new_workspace();
+    // Bold the second cell only; the first is plain, so the selection gains bold.
+    script().char('j').chars(":bold").enter().char('k').run(&mut ws).expect("script");
+    script().char('v').chars("jj").char(':').chars("bold").enter()
+        .run(&mut ws).expect("script");
+    for r in 1..=3 {
+        assert!(has_style(&ws, r, 1, StyleFlag::Bold), "{r}");
+    }
+    assert!(!has_style(&ws, 4, 1, StyleFlag::Bold));
+    assert_eq!(Some("Bold: 3 cells".to_owned()), last_message(&ws));
+    run_command(&mut ws, "undo");
+    assert!(!has_style(&ws, 1, 1, StyleFlag::Bold));
+    assert!(has_style(&ws, 2, 1, StyleFlag::Bold));
+}
+
+#[test]
+fn test_style_cmd_unknown_word_changes_nothing() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "style bold shiny");
+    assert_eq!(Some("Unknown style: shiny".to_owned()), last_message(&ws));
+    assert_eq!(super::MessageLevel::Error, ws.state.message.as_ref().unwrap().level);
+    assert!(!has_style(&ws, 1, 1, StyleFlag::Bold));
+    run_command(&mut ws, "style");
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+    assert!(popup_text(&ws).contains("Usage: style <attr>..."));
 }
