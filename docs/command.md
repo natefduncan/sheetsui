@@ -113,6 +113,47 @@ Anything that is not a preset name is a raw Excel format code. It is everything 
 
 **Typing into a formatted cell.** Typing a plain number keeps the cell's format. Typing a value that carries its own format, such as `5%` or `$12`, gives the cell the format that value implies and drops the one you set (`5%` in a currency cell becomes `#,##0%`). These commands do not change that, or copy and paste. Fill copies formats.
 
+## Text styles
+
+`:style` and its relatives change how a cell looks: bold, italic, underline, strikethrough, font color and horizontal alignment. They never change what the cell holds. The style is saved in `.sui` and `.xlsx` files.
+
+| Word | Does | Key |
+|------|------|-----|
+| `bold` | toggles bold | `<A-b>` |
+| `italic` | toggles italic | `<A-i>` |
+| `underline` | toggles underline | `<A-u>` |
+| `strike` | toggles strikethrough | `<A-s>` |
+| `nobold`, `noitalic`, `nounderline`, `nostrike` | clear that attribute | |
+| `left` | aligns left | `<A-l>` |
+| `center` | aligns center | `<A-e>` |
+| `right` | aligns right | `<A-;>` |
+| `general` | clears the alignment: text left, numbers right | |
+| `color=<color>`, `nocolor` | sets or clears the font color | |
+
+```
+:style bold
+:style bold underline
+:style color=red nobold
+:style-cols italic
+:style-cols 3 center
+:style-rows 2 bold
+:bold
+:align right
+:font-color blue
+:clear-style
+:clear-style-cols 2
+```
+
+* **Toggles.** `bold`, `italic`, `underline` and `strike` are decided once, from the cursor cell (the first selected cell in range select mode), and applied to the whole area. If that cell has the attribute the area loses it, otherwise the area gets it, so a mixed selection ends up uniform. This is Excel's rule. For `style-cols` and `style-rows` the cursor cell decides too.
+* **Keys.** The keys work in navigation and range select mode and are one undo step each. The toggle keys decide as above. The alignment keys set the alignment and do not toggle it; there is no key for `general`, use `:align general`. See [Key notation](./keys.md#key-notation) for why they use Alt.
+* **Empty cells.** A style applies to empty and text cells too, and a value typed into a styled cell keeps the style.
+* **Whole columns and rows.** `style-cols` and `style-rows` change only the attributes you name. A cell's fill, number format and other style are kept.
+* **`clear-style`** resets bold, italic, underline, strikethrough, font color, fill, alignment and the number format on the area, as Excel's Clear Formats does. It leaves values and formulas alone. Wrap and vertical alignment, which sheetui cannot set, are cleared with the alignment.
+* **Errors.** An unknown word is `Unknown style: <word>`, a word given twice is `Repeated style: <word>`, and a bad color, a count of 0 or one past the last column or row is an error. A command that fails changes nothing.
+* **Never changes a width.** A style never changes a column width or the displayed text, and `gw` does not measure a bold value wider.
+* **Copy, paste and fill.** `:fill-down`, `:fill-right` and `:fill-series` copy the style with the value. Copy and paste move the displayed values only: a pasted cell keeps its own style, and the style of the cell it came from is not copied.
+* **Drawing.** Underline and strikethrough are terminal attributes, and a terminal that cannot draw them shows plain text. The cursor, selection and search colors are drawn on top of a cell's style and keep its bold, italic, underline and strikethrough.
+
 ## Column widths
 
 A width is a number of terminal characters, from 1 to 255. `:col-width`, `:autofit-cols`, `<C-l>` and `<C-h>` all keep to that range. `<C-l>` stops at 255 and `<C-h>` at 1; at the limit the key does nothing and says nothing.

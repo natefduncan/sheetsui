@@ -13,7 +13,7 @@ text will treat it as text content.
 
 <aside>We do not yet support modifying the type of a cell after the fact. We
 may add this in the future. To change how a number is shown, as currency, a
-percent or a date, use `:format`. See [Number formats](./command.md#number-formats).</aside>
+percent or a date, use `:format`. See [Number formats](./command.md#number-formats). To make it bold, italic, underlined or centered, or to color its text, use `:style`. See [Text styles](./command.md#text-styles).</aside>
 
 For the most part this should work the same way you expect a spreadsheet to
 work.
