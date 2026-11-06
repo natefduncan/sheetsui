@@ -45,6 +45,9 @@ use crate::ui::Address;
 mod test;
 
 pub(crate) const COL_PIXELS: f64 = 5.0;
+/// The width ironcalc reports for a column with no width of its own: 90
+/// pixels, which is 18 characters.
+const IRONCALC_DEFAULT_PIXELS: f64 = 90.0;
 
 /// The width, in characters, of a column with no width of its own.
 pub const DEFAULT_COL_WIDTH: usize = 18;
@@ -144,6 +147,9 @@ pub struct Book {
     frozen: std::collections::HashMap<u32, (usize, usize)>,
     /// A freeze changed since the last save. Undo must not clear `dirty` then.
     freeze_unsaved: bool,
+    /// The `defaultwidth` option: the width of a column with no width of its
+    /// own. A display setting; never saved. See `planning/col-width-design.md`.
+    default_width: usize,
     undo: UndoHistory,
 }
 
@@ -169,6 +175,7 @@ impl Book {
             parse_warnings: Vec::new(),
             frozen: Default::default(),
             freeze_unsaved: false,
+            default_width: DEFAULT_COL_WIDTH,
             undo,
         }
     }
@@ -1147,11 +1154,48 @@ impl Book {
         sheet: u32,
         idx: usize,
     ) -> std::result::Result<usize, anyhow::Error> {
-        Ok((self
+        let pixels = self
             .model
             .get_column_width(sheet, idx as i32)
-            .map_err(|e| anyhow!("Error getting column width: {:?}", e))?
-            / COL_PIXELS) as usize)
+            .map_err(|e| anyhow!("Error getting column width: {:?}", e))?;
+        // ironcalc cannot tell a column set to exactly its default from one
+        // with no width, so a column at exactly 18 counts as unset and follows
+        // `defaultwidth`.
+        if pixels == IRONCALC_DEFAULT_PIXELS {
+            return Ok(self.default_width);
+        }
+        Ok((pixels / COL_PIXELS) as usize)
+    }
+
+    /// The width a column with no width of its own has.
+    pub fn default_width(&self) -> usize {
+        self.default_width
+    }
+
+    /// Sets the `defaultwidth` option. Columns with no width of their own
+    /// follow it at once. It is not an undo step and does not dirty the book.
+    pub fn set_default_width(&mut self, width: usize) {
+        self.default_width = width;
+    }
+
+    /// Clears the saved width of `count` columns, from `first` going right,
+    /// as one undo step, so they follow `defaultwidth`. Nothing changes if the
+    /// columns run past the last column.
+    pub fn clear_col_widths(&mut self, first: usize, count: usize) -> Result<()> {
+        if count == 0 || first + count - 1 > LAST_COLUMN as usize {
+            return Err(anyhow!("The columns run past column {LAST_COLUMN}"));
+        }
+        let sheet = self.location.sheet;
+        self.as_action(|book| {
+            for col in first..first + count {
+                book.change(|m| {
+                    m.set_columns_width(sheet, col as i32, col as i32, IRONCALC_DEFAULT_PIXELS)
+                })
+                .map_err(|e| anyhow!("Error setting column width: {:?}", e))?;
+                book.dirty = true;
+            }
+            Ok(())
+        })
     }
 
     pub fn set_col_size(&mut self, col: usize, width: usize) -> Result<()> {
@@ -1247,8 +1291,16 @@ impl Book {
         };
         self.as_action(|book| {
             for (col, width) in widths {
-                book.set_column_size_for_sheet(sheet, col, width.unwrap_or(DEFAULT_COL_WIDTH))?;
+                match width {
+                    Some(width) => book.set_column_size_for_sheet(sheet, col, width)?,
+                    None => book
+                        .change(|m| {
+                            m.set_columns_width(sheet, col as i32, col as i32, IRONCALC_DEFAULT_PIXELS)
+                        })
+                        .map_err(|e| anyhow!("Error setting column width: {:?}", e))?,
+                }
             }
+            book.dirty = true;
             Ok(())
         })?;
         Ok(report)

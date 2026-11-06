@@ -12,6 +12,8 @@ pub enum Kind {
     Bool(bool),
     /// One of a fixed list of words. The default is the first.
     Choice(&'static [&'static str]),
+    /// A whole number from `min` to `max`, and its default.
+    Number { default: usize, min: usize, max: usize },
 }
 
 /// One row of the options table.
@@ -55,6 +57,15 @@ pub const OPTIONS: &[Spec] = &[
         short: Some("is"),
         kind: Kind::Bool(true),
     },
+    Spec {
+        name: "defaultwidth",
+        short: Some("dw"),
+        kind: Kind::Number {
+            default: 18,
+            min: 1,
+            max: 255,
+        },
+    },
 ];
 
 /// The current value of an option.
@@ -62,6 +73,7 @@ pub const OPTIONS: &[Spec] = &[
 pub enum Value {
     Bool(bool),
     Choice(&'static str),
+    Number(usize),
 }
 
 impl Kind {
@@ -69,6 +81,7 @@ impl Kind {
         match self {
             Kind::Bool(on) => Value::Bool(on),
             Kind::Choice(words) => Value::Choice(words[0]),
+            Kind::Number { default, .. } => Value::Number(default),
         }
     }
 }
@@ -129,6 +142,14 @@ impl Options {
         }
     }
 
+    /// The width of a column with no width of its own.
+    pub fn defaultwidth(&self) -> usize {
+        match self.get("defaultwidth") {
+            Some(Value::Number(width)) => width,
+            other => panic!("defaultwidth is not a number option: {other:?}"),
+        }
+    }
+
     /// The value of a boolean option. Panics on a name not in the table,
     /// which is a bug in the getter, not a user error.
     fn flag(&self, name: &str) -> bool {
@@ -176,8 +197,20 @@ impl Options {
         let invalid = || format!("E474: Invalid argument: {arg}");
         if let Some((name, value)) = arg.split_once('=') {
             let i = self.lookup(name)?;
-            let Kind::Choice(words) = self.table[i].kind else {
-                return Err(invalid());
+            let words = match self.table[i].kind {
+                Kind::Choice(words) => words,
+                Kind::Number { min, max, .. } => {
+                    return match value.parse::<usize>() {
+                        Ok(n) if (min..=max).contains(&n) => {
+                            self.values[i] = Value::Number(n);
+                            Ok(None)
+                        }
+                        _ => Err(format!(
+                            "E474: Invalid argument: {arg} (a whole number from {min} to {max})"
+                        )),
+                    };
+                }
+                Kind::Bool(_) => return Err(invalid()),
             };
             let Some(word) = words.iter().find(|w| **w == value) else {
                 return Err(format!(
@@ -215,7 +248,7 @@ impl Options {
                 Ok(None)
             }
             // As in vim, naming a value option shows it.
-            Value::Choice(_) => Ok(Some(self.show(i))),
+            Value::Choice(_) | Value::Number(_) => Ok(Some(self.show(i))),
         }
     }
 
@@ -231,6 +264,7 @@ impl Options {
             Value::Bool(true) => name.to_owned(),
             Value::Bool(false) => format!("no{name}"),
             Value::Choice(word) => format!("{name}={word}"),
+            Value::Number(n) => format!("{name}={n}"),
         }
     }
 }
@@ -238,6 +272,26 @@ impl Options {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn defaultwidth_is_a_number_from_1_to_255() {
+        let mut o = Options::default();
+        assert_eq!(18, o.defaultwidth());
+        assert_eq!(Ok(None), o.set("defaultwidth=24"));
+        assert_eq!(24, o.defaultwidth());
+        assert_eq!(Ok(Some("defaultwidth=24".to_owned())), o.set("dw?"));
+        assert_eq!(Ok(Some("defaultwidth=24".to_owned())), o.set("dw"));
+        assert_eq!(Ok(None), o.set("dw=1"));
+        assert_eq!(Ok(None), o.set("dw=255"));
+        for bad in ["dw=0", "dw=256", "dw=abc", "dw=", "dw=-3", "dw=1.5"] {
+            let err = o.set(bad).unwrap_err();
+            assert!(err.starts_with(&format!("E474: Invalid argument: {bad}")), "{err}");
+            assert_eq!(255, o.defaultwidth(), "{bad}");
+        }
+        for bad in ["nodw", "dw!"] {
+            assert_eq!(Err(format!("E474: Invalid argument: {bad}")), o.set(bad));
+        }
+    }
 
     #[test]
     fn searchin_switches_between_value_and_raw() {

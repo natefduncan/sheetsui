@@ -3630,7 +3630,7 @@ fn test_set_shows_and_changes_wrapscan() {
     assert!(!ws.state.options.wrapscan());
     run_command(&mut ws, "set");
     assert_eq!(
-        Some("nowrapscan  noignorecase  nosmartcase  searchin=value  hlsearch  incsearch".to_owned()),
+        Some("nowrapscan  noignorecase  nosmartcase  searchin=value  hlsearch  incsearch  defaultwidth=18".to_owned()),
         last_message(&ws)
     );
     run_command(&mut ws, "set ws!");
@@ -5797,4 +5797,81 @@ fn test_gw_and_w_can_be_remapped_and_unmapped() {
     type_command(&mut ws, "vunmap w");
     run(&mut ws, script().chars("vw"));
     assert_eq!(18, ws.book.get_col_size(1).unwrap());
+}
+
+#[test]
+fn test_set_defaultwidth_moves_unset_columns_but_not_set_ones() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "col-width 30 2");
+    run_command(&mut ws, "set dw=24");
+    assert_eq!(24, ws.book.get_col_size(3).unwrap());
+    assert_eq!(30, ws.book.get_col_size(1).unwrap());
+    assert_eq!(30, ws.book.get_col_size(2).unwrap());
+    run_command(&mut ws, "set defaultwidth=10");
+    assert_eq!(10, ws.book.get_col_size(3).unwrap());
+    assert_eq!(30, ws.book.get_col_size(1).unwrap());
+}
+
+#[test]
+fn test_set_defaultwidth_bad_values_change_nothing() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "set dw=24");
+    for bad in ["dw=0", "dw=256", "dw=abc"] {
+        run_command(&mut ws, &format!("set {bad}"));
+        assert!(last_message(&ws).unwrap().starts_with("E474"), "{bad}");
+        assert_eq!(24, ws.book.get_col_size(3).unwrap(), "{bad}");
+    }
+    run_command(&mut ws, "set dw?");
+    assert_eq!(Some("defaultwidth=24".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_config_file_sets_the_default_width() {
+    let dir = temp_config_dir("config-dw");
+    std::fs::write(dir.join("config"), "set dw=24\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_config_from(None, Some(dir));
+    assert_eq!(24, ws.book.get_col_size(5).unwrap());
+}
+
+#[test]
+fn test_col_width_default_parses() {
+    assert_eq!(Cmd::ColWidthDefault { count: 1 }, parse("col-width default").unwrap().unwrap());
+    assert_eq!(Cmd::ColWidthDefault { count: 3 }, parse("col-width default 3").unwrap().unwrap());
+    for bad in ["col-width default 0", "col-width default x", "col-width default 1 2", "col-width defaultx"] {
+        let err = parse(bad).expect_err(bad);
+        assert!(err.contains("Usage: col-width"), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn test_col_width_default_clears_saved_widths_in_one_undo_step() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "set dw=12");
+    run_command(&mut ws, "col-width 30 3");
+    run_command(&mut ws, "col-width default 3");
+    for c in 1..=3 {
+        assert_eq!(12, ws.book.get_col_size(c).unwrap());
+    }
+    assert_eq!(Some("Columns A:C width default (12)".to_owned()), last_message(&ws));
+    run_command(&mut ws, "col-width default");
+    assert_eq!(Some("Column A width default (12)".to_owned()), last_message(&ws));
+    run_command(&mut ws, "col-width 30");
+    run(&mut ws, script().char('u'));
+    run(&mut ws, script().char('u'));
+    run(&mut ws, script().char('u'));
+    for c in 1..=3 {
+        assert_eq!(30, ws.book.get_col_size(c).unwrap());
+    }
+}
+
+#[test]
+fn test_autofit_empty_column_resets_to_the_option() {
+    let mut ws = sort_workspace(&[&["hello world"]]);
+    run_command(&mut ws, "set dw=24");
+    run_command(&mut ws, "col-width 40 2");
+    ws.book.location.col = 2;
+    run_command(&mut ws, "autofit-cols");
+    assert_eq!(24, ws.book.get_col_size(2).unwrap());
+    assert_eq!(Some("Column B is empty, reset to 24".to_owned()), last_message(&ws));
 }

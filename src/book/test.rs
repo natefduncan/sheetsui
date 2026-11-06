@@ -2373,3 +2373,55 @@ fn test_autofit_cols_past_the_last_column_changes_nothing() {
     assert_eq!(before, book.get_col_size(last).unwrap());
     assert!(!book.undo().unwrap());
 }
+
+#[test]
+fn test_unset_columns_follow_the_default_width() {
+    let mut book = Book::default();
+    book.set_col_widths(1, 1, 30).unwrap();
+    book.set_default_width(24);
+    assert_eq!(30, book.get_col_size(1).unwrap());
+    assert_eq!(24, book.get_col_size(2).unwrap());
+    // A column set to exactly 18 counts as unset: ironcalc cannot tell.
+    book.set_col_widths(3, 1, 18).unwrap();
+    assert_eq!(24, book.get_col_size(3).unwrap());
+}
+
+#[test]
+fn test_clear_col_widths_past_the_last_column_changes_nothing() {
+    let mut book = Book::default();
+    let last = crate::book::LAST_COLUMN as usize;
+    book.set_col_widths(last, 1, 9).unwrap();
+    assert!(book.clear_col_widths(last, 2).is_err());
+    assert_eq!(9, book.get_col_size(last).unwrap());
+}
+
+#[test]
+fn test_default_width_is_never_saved() {
+    let mut book = Book::default();
+    book.set_default_width(24);
+    book.set_col_widths(2, 1, 30).unwrap();
+    let text = crate::book::sui::serialize_sui(&book);
+    assert!(text.contains("col 2 width 30"), "{text}");
+    assert!(!text.contains("width 24"), "{text}");
+    assert!(!text.contains("col 1 width"), "{text}");
+    // Read with another default, the unset columns show that default.
+    let (mut read, _) = crate::book::sui::parse_sui(&text);
+    read.set_default_width(10);
+    assert_eq!(10, read.get_col_size(1).unwrap());
+    assert_eq!(30, read.get_col_size(2).unwrap());
+}
+
+#[test]
+fn test_xlsx_writes_no_width_for_columns_following_the_default() {
+    let mut book = Book::default();
+    book.set_default_width(24);
+    book.set_col_widths(2, 1, 30).unwrap();
+    let dir = std::env::temp_dir().join(format!("sheetui-dw-xlsx-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("w.xlsx");
+    book.save_as(&path).unwrap();
+    let mut read = Book::load(&path, "en", "America/New_York").unwrap();
+    read.set_default_width(10);
+    assert_eq!(10, read.get_col_size(1).unwrap());
+    assert_eq!(30, read.get_col_size(2).unwrap());
+}

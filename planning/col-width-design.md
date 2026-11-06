@@ -110,6 +110,11 @@ no entry in the sheet's own list of column settings, it reports
 the fallback is that a column at exactly 18 counts as unset, and the design
 doc for the change notes which one was used.
 
+**Used: the fallback.** ironcalc sets `custom_width` to `width != 90 pixels`, so
+a column set to exactly 18 is stored the same as one with no entry. A column at
+exactly 18 counts as unset and follows `defaultwidth`: with `dw=24`,
+`:col-width 18` shows 24. Use `:col-width 19` or change the option instead.
+
 `.sui` and `.xlsx` writers compare against `defaultwidth` so that a column
 following the option writes no line. Because the option is not saved, a file
 written with `dw=24` and read with `dw=18` shows those columns at 18. This is

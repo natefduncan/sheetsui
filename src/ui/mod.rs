@@ -338,6 +338,7 @@ impl<'ws> Workspace<'ws> {
         // FIXME(zaphar): This should be managed better.
         let book = load_book(&path, "en", "America/New_York")?;
         self.book = book;
+        self.sync_default_width();
         self.name = path;
         Ok(())
     }
@@ -854,7 +855,10 @@ impl<'ws> Workspace<'ws> {
                 Ok(None)
             }
             Ok(Some(Cmd::Set(args))) => {
-                match self.state.options.set(args) {
+                let result = self.state.options.set(args);
+                // Settings before an error stay applied.
+                self.sync_default_width();
+                match result {
                     Ok(Some(text)) => self.set_message(MessageLevel::Info, text),
                     Ok(None) => {}
                     Err(text) => self.set_message(MessageLevel::Error, text),
@@ -926,6 +930,10 @@ impl<'ws> Workspace<'ws> {
             Ok(Some(Cmd::FillSeries(dir, count))) => self.fill_series(dir, count),
             Ok(Some(Cmd::ColWidth { width, count })) => {
                 self.col_width(width, count);
+                Ok(None)
+            }
+            Ok(Some(Cmd::ColWidthDefault { count })) => {
+                self.col_width_default(count);
                 Ok(None)
             }
             Ok(Some(Cmd::AutofitCols(count))) => {
@@ -1683,6 +1691,29 @@ impl<'ws> Workspace<'ws> {
         }
     }
 
+    fn col_width_default(&mut self, count: usize) {
+        if self.in_cell_edit_range_select() {
+            return;
+        }
+        let (first, count, _) = self.col_targets(count);
+        match self.book.clear_col_widths(first, count) {
+            Ok(()) => {
+                let name = |c: usize| number_to_column(c as i32).unwrap_or_default();
+                let default = self.book.default_width();
+                let text = if count == 1 {
+                    format!("Column {} width default ({default})", name(first))
+                } else {
+                    format!("Columns {}:{} width default ({default})", name(first), name(first + count - 1))
+                };
+                self.set_message(MessageLevel::Info, text);
+            }
+            Err(_) => self.set_message(
+                MessageLevel::Error,
+                "Usage: col-width <1-255|default> [count]: the columns run past the last column".to_string(),
+            ),
+        }
+    }
+
     fn autofit_cols(&mut self, count: usize) {
         if self.in_cell_edit_range_select() {
             return;
@@ -1691,7 +1722,7 @@ impl<'ws> Workspace<'ws> {
         match self.book.autofit_cols(first, count, rows) {
             Ok(report) => {
                 let name = |c: usize| number_to_column(c as i32).unwrap_or_default();
-                let text = autofit_message(first, count, report, name);
+                let text = autofit_message(first, count, report, self.book.default_width(), name);
                 self.set_message(MessageLevel::Info, text);
             }
             Err(_) => self.set_message(
@@ -2321,7 +2352,13 @@ impl<'ws> Workspace<'ws> {
         );
         self.state.keymap.warnings = loaded.warnings;
         self.state.config_theme = loaded.theme;
+        self.sync_default_width();
         self.report_startup_warnings();
+    }
+
+    /// Gives the book the `defaultwidth` option's value.
+    fn sync_default_width(&mut self) {
+        self.book.set_default_width(self.state.options.defaultwidth());
     }
 
     /// Counts the startup warnings so far (config, keys and theme) on the
@@ -2531,10 +2568,10 @@ fn autofit_message(
     first: usize,
     count: usize,
     report: crate::book::AutofitReport,
+    default: usize,
     name: impl Fn(usize) -> String,
 ) -> String {
     let crate::book::AutofitReport { fitted, empty } = report;
-    let default = crate::book::DEFAULT_COL_WIDTH;
     if count == 1 {
         return if empty == 1 {
             format!("Column {} is empty, reset to {default}", name(first))

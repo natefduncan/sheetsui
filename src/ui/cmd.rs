@@ -19,6 +19,8 @@ pub enum Cmd<'a> {
     /// `:col-width <1-255> [count]`: set `count` columns, from the cursor
     /// going right, to `width` characters.
     ColWidth { width: usize, count: usize },
+    /// `:col-width default [count]`: clear the saved width of `count` columns.
+    ColWidthDefault { count: usize },
     /// `:autofit-cols [count]`: fit `count` columns, from the cursor going
     /// right, to their contents.
     AutofitCols(usize),
@@ -453,8 +455,10 @@ fn try_consume_col_width<'cmd, 'i: 'cmd>(
     }
     let arg = input.span(0..).trim();
     let mut words = arg.split_whitespace();
-    let width = match words.next().map(|w| w.parse::<usize>()) {
-        Some(Ok(width)) if (1..=MAX_COL_WIDTH).contains(&width) => width,
+    let first = words.next();
+    let width = match first.map(|w| w.parse::<usize>()) {
+        Some(Ok(width)) if (1..=MAX_COL_WIDTH).contains(&width) => Some(width),
+        _ if first == Some("default") => None,
         _ => return Err(USAGE),
     };
     let count = match words.next().map(|w| w.parse::<usize>()) {
@@ -465,7 +469,10 @@ fn try_consume_col_width<'cmd, 'i: 'cmd>(
     if words.next().is_some() {
         return Err(USAGE);
     }
-    Ok(Some(Cmd::ColWidth { width, count }))
+    Ok(Some(match width {
+        Some(width) => Cmd::ColWidth { width, count },
+        None => Cmd::ColWidthDefault { count },
+    }))
 }
 
 fn try_consume_autofit_cols<'cmd, 'i: 'cmd>(

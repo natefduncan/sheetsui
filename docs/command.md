@@ -34,8 +34,9 @@ The currently supported commands are:
 * `fill-down [count]` copies the cell above onto the cursor cell, moving formula references and copying formats. With a count it fills that many cells down from the cursor, all from the cell above the cursor. `<C-d>` does the same in navigation mode. See [Filling](#filling).
 * `fill-right [count]` Just like `fill-down` but copies the cell to the left, to the right. `<C-r>` does the same in navigation mode.
 * `fill-series <up|down|left|right> <count>` takes the selection, or the cursor cell, as seeds and extends it by count cells in that direction, continuing a series. See [Filling](#filling).
+* `col-width default [count]` clears the saved width of the cursor column, or `count` columns going right from it, so they follow the `defaultwidth` option. It is one undo step.
 * `col-width <1-255> [count]` sets the cursor column, or `count` columns going right from it, to that many characters. It is one undo step. A missing or bad width, a count of 0, or a count that runs past the last column is an error, and no width changes.
-* `autofit-cols [count]` fits the cursor column, or `count` columns going right from it, to the widest displayed value in each (3 to 60 characters, wide characters count as 2, merged cells are skipped). A column with nothing to measure is reset to the default width. It is one undo step.
+* `autofit-cols [count]` fits the cursor column, or `count` columns going right from it, to the widest displayed value in each (3 to 60 characters, wide characters count as 2, merged cells are skipped). A column with nothing to measure is reset to the `defaultwidth` option's value. It is one undo step.
 * `freeze` with no arguments pins every row above and every column left of the cursor, counted from row 1 and column A even when the sheet is scrolled. On A1 there is nothing to pin, so nothing changes and a message says so.
 * `freeze <rows> [cols]` pin that many rows (and columns) so they stay visible while the rest scrolls. `freeze 0 0` clears it. The freeze is kept per sheet, is not undoable, and is saved in `.xlsx` files only. A line marks the boundary, styled by the `freeze.line` theme slot.
 * `unfreeze` clear the freeze on the current sheet. The same as `freeze 0 0`.
@@ -234,6 +235,13 @@ that does not fit the option, like `set ws=1`, or a value that is not one of
 the option's values, says `E474: Invalid argument`.
 
 The options are:
+
+* `defaultwidth` (`dw`), a whole number from 1 to 255, default 18. The width of
+  every column that has no width of its own, and it changes them at once. It is
+  a display setting: no `.sui` or `.xlsx` file saves it, so a file read with another
+  `defaultwidth` shows its unset columns at that one. ironcalc cannot tell a
+  column set to exactly 18 from one with no width, so a column at exactly 18
+  counts as unset and follows `defaultwidth`.
 
 * `wrapscan` (`ws`), on or off, default on. A search that passes the end of
   the sheet goes on from the other end. Off, it stops there and says `E385`.
