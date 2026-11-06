@@ -17,6 +17,7 @@ Options:
   -t, --timezone-name <TIMEZONE_NAME>  [default: America/New_York]
       --log-input <LOG_INPUT>
       --theme <THEME>                  A theme name or a path to a theme file
+      --config <CONFIG>                A config file of startup commands, instead of the one in the config directory
       --keys <KEYS>                    A keys file of `nnoremap` and `nunmap` lines, instead of the one in the config directory
   -h, --help                           Print help
   -V, --version                        Print version
@@ -59,5 +60,6 @@ get some context sensitive help.
 
 ### Customizing
 
+* [The Config File](./config.md)
 * [Themes](./themes.md)
 * [Key Mappings](./keys.md)

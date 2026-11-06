@@ -45,7 +45,7 @@ The currently supported commands are:
 * `select-sheet <name>` Select a sheet by name.
 * `edit <path>` Open a spreadsheet from the given path. Format is auto-detected from the file extension (`.xlsx` → Excel, `.csv` → CSV, everything else → `.sui`). `e` is a shorthand alias for this command.
 * `help [topic]` Display help for a given topic.
-* `config` list every warning from loading the config file, the keys file and the theme at startup, with its file and line, or say there are none.
+* `config` list every warning from loading the config file, the keys file and the theme at startup, with its file and line, or say there are none. See [The Config File](./config.md).
 * `theme [name]` Switch to a theme. With no name, lists the built-in and user themes and any warnings from the last theme load. See [Themes](./themes.md).
 * `export-csv <path>` Export the current sheet to a csv file at `<path>`.
 * `quit` Quits the application. `q` is a shorthand alias for this command.
@@ -217,7 +217,8 @@ changes nothing is not a step.
 
 ## Options
 
-`set` changes options. They last until you quit and are not saved.
+`set` changes options. They last until you quit and `set` never saves them. A `set` line in the
+[config file](./config.md) sets the start value for every session.
 
 * `set ws` turns an option on. `set nows` turns it off. `set ws!` toggles it.
 * `set ws?` shows its value on the message line, for example `nowrapscan`.

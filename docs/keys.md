@@ -35,6 +35,10 @@ in the `search` group of the help. See [Search and Replace](./search.md).
 
 ## The keys file
 
+Mappings can go in the [config file](./config.md) too. The keys file still
+works with no change. sheetui reads `config` first, then the keys file, so a
+mapping in the keys file replaces one in `config` for the same keys.
+
 sheetui reads the keys file when it starts, after the theme. It looks in this
 order:
 
