@@ -5656,3 +5656,47 @@ fn test_col_width_is_one_undo_step_and_redoes() {
         assert_eq!(9, ws.book.get_col_size(c).unwrap());
     }
 }
+
+#[test]
+fn test_autofit_cols_cmd_forms_and_usage_errors() {
+    assert_eq!(Cmd::AutofitCols(1), parse("autofit-cols").unwrap().unwrap());
+    assert_eq!(Cmd::AutofitCols(3), parse("autofit-cols 3").unwrap().unwrap());
+    for bad in ["autofit-cols 0", "autofit-cols x", "autofit-cols 1 2", "autofit-colsx", "autofit-cols -1"] {
+        let err = parse(bad).expect_err(bad);
+        assert!(err.contains("Usage: autofit-cols [count]"), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn test_autofit_cols_fits_columns_and_says_so() {
+    let mut ws = sort_workspace(&[&["hello world", "", "x"]]);
+    run_command(&mut ws, "autofit-cols");
+    assert_eq!(11, ws.book.get_col_size(1).unwrap());
+    assert_eq!(Some("Fitted column A".to_owned()), last_message(&ws));
+    run_command(&mut ws, "col-width 40 3");
+    run_command(&mut ws, "autofit-cols 3");
+    assert_eq!(11, ws.book.get_col_size(1).unwrap());
+    assert_eq!(18, ws.book.get_col_size(2).unwrap());
+    assert_eq!(3, ws.book.get_col_size(3).unwrap());
+    assert_eq!(Some("Fitted 3 columns (1 empty, reset to 18)".to_owned()), last_message(&ws));
+    run(&mut ws, script().char('u'));
+    assert_eq!(40, ws.book.get_col_size(2).unwrap());
+    // A lone empty column.
+    ws.book.location.col = 2;
+    run_command(&mut ws, "autofit-cols");
+    assert_eq!(Some("Column B is empty, reset to 18".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_autofit_cols_errors_change_nothing() {
+    let mut ws = sort_workspace(&[&["hello world"]]);
+    let before = ws.book.get_col_size(1).unwrap();
+    run_command(&mut ws, "autofit-cols 0");
+    assert_eq!(before, ws.book.get_col_size(1).unwrap());
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+    let mut ws = sort_workspace(&[&["hello world"]]);
+    ws.book.location.col = crate::book::LAST_COLUMN as usize;
+    run_command(&mut ws, "autofit-cols 2");
+    assert!(last_message(&ws).unwrap().contains("Usage"));
+    assert_eq!(before, ws.book.get_col_size(crate::book::LAST_COLUMN as usize).unwrap());
+}

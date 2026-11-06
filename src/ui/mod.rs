@@ -943,6 +943,21 @@ impl<'ws> Workspace<'ws> {
                 }
                 Ok(None)
             }
+            Ok(Some(Cmd::AutofitCols(count))) => {
+                let first = self.book.location.col;
+                match self.book.autofit_cols(first, count, None) {
+                    Ok(report) => {
+                        let name = |c: usize| number_to_column(c as i32).unwrap_or_default();
+                        let text = autofit_message(first, count, report, name);
+                        self.set_message(MessageLevel::Info, text);
+                    }
+                    Err(_) => self.set_message(
+                        MessageLevel::Error,
+                        "Usage: autofit-cols [count]: the columns run past the last column".to_string(),
+                    ),
+                }
+                Ok(None)
+            }
             Ok(Some(Cmd::RenameSheet(idx, name))) => {
                 match idx {
                     Some(idx) => {
@@ -2471,4 +2486,28 @@ fn reset_text_area<'a>(content: String, theme: &Theme) -> TextArea<'a> {
     text_area.set_cursor_style(Style::default());
     style_text_area(&mut text_area, theme);
     text_area
+}
+
+/// The message line text for `:autofit-cols`.
+fn autofit_message(
+    first: usize,
+    count: usize,
+    report: crate::book::AutofitReport,
+    name: impl Fn(usize) -> String,
+) -> String {
+    let crate::book::AutofitReport { fitted, empty } = report;
+    let default = crate::book::DEFAULT_COL_WIDTH;
+    if count == 1 {
+        return if empty == 1 {
+            format!("Column {} is empty, reset to {default}", name(first))
+        } else {
+            format!("Fitted column {}", name(first))
+        };
+    }
+    let total = fitted + empty;
+    if empty == 0 {
+        format!("Fitted {total} columns")
+    } else {
+        format!("Fitted {total} columns ({empty} empty, reset to {default})")
+    }
 }

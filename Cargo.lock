@@ -2323,6 +2323,7 @@ dependencies = [
  "time",
  "tui-markdown",
  "tui-prompts",
+ "unicode-width 0.2.2",
 ]
 
 [[package]]

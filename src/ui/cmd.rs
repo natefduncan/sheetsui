@@ -19,6 +19,9 @@ pub enum Cmd<'a> {
     /// `:col-width <1-255> [count]`: set `count` columns, from the cursor
     /// going right, to `width` characters.
     ColWidth { width: usize, count: usize },
+    /// `:autofit-cols [count]`: fit `count` columns, from the cursor going
+    /// right, to their contents.
+    AutofitCols(usize),
     ColorRows(Option<usize>, String),
     ColorColumns(Option<usize>, String),
     ColorCell(String),
@@ -114,6 +117,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_col_width(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_autofit_cols(cursor.clone())? {
         return Ok(Some(cmd));
     }
     // Try consume export
@@ -460,6 +466,31 @@ fn try_consume_col_width<'cmd, 'i: 'cmd>(
         return Err(USAGE);
     }
     Ok(Some(Cmd::ColWidth { width, count }))
+}
+
+fn try_consume_autofit_cols<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "autofit-cols";
+    const USAGE: &str = "Usage: autofit-cols [count]";
+
+    if !compare(input.clone(), LONG) {
+        return Ok(None);
+    }
+    input.seek(LONG.len());
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err(USAGE);
+    }
+    let mut words = input.span(0..).split_whitespace();
+    let count = match words.next().map(|w| w.parse::<usize>()) {
+        None => 1,
+        Some(Ok(count)) if count > 0 => count,
+        _ => return Err(USAGE),
+    };
+    if words.next().is_some() {
+        return Err(USAGE);
+    }
+    Ok(Some(Cmd::AutofitCols(count)))
 }
 
 fn try_consume_delete_row<'cmd, 'i: 'cmd>(

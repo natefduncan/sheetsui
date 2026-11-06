@@ -5,7 +5,7 @@ use crate::ui::Address;
 use super::{
     shrink_freeze,
     search::{Direction, SearchIn},
-    Book, FileFormat, LAST_COLUMN, LAST_ROW,
+    AutofitReport, Book, FileFormat, DEFAULT_COL_WIDTH, LAST_COLUMN, LAST_ROW,
 };
 use ironcalc::base::UserModel;
 
@@ -2284,6 +2284,92 @@ fn test_set_col_widths_past_the_last_column_changes_nothing() {
     let before = book.get_col_size(last).unwrap();
     assert!(book.set_col_widths(last, 2, 9).is_err());
     assert!(book.set_col_widths(1, 0, 9).is_err());
+    assert_eq!(before, book.get_col_size(last).unwrap());
+    assert!(!book.undo().unwrap());
+}
+
+fn autofit_book(cells: &[(usize, usize, &str)]) -> Book {
+    let mut book = Book::default();
+    for (row, col, value) in cells {
+        book.update_cell(&Address { sheet: 0, row: *row, col: *col }, *value).unwrap();
+    }
+    book
+}
+
+#[test]
+fn test_autofit_width_text_formula_format_multiline_and_cjk() {
+    let book = autofit_book(&[(1, 1, "hello"), (2, 1, "hi"), (1, 2, "=\"abcdefgh\""), (1, 3, "a\nlonger line\nb"), (1, 4, "日本語")]);
+    assert_eq!(Some(5), book.autofit_col_width(1, None).unwrap());
+    assert_eq!(Some(8), book.autofit_col_width(2, None).unwrap());
+    assert_eq!(Some(11), book.autofit_col_width(3, None).unwrap());
+    assert_eq!(Some(6), book.autofit_col_width(4, None).unwrap());
+    // An empty column has nothing to measure.
+    assert_eq!(None, book.autofit_col_width(5, None).unwrap());
+}
+
+#[test]
+fn test_autofit_width_measures_the_displayed_value() {
+    let mut book = autofit_book(&[(1, 1, "12"), (1, 2, "=1/3")]);
+    assert_eq!(Some(3), book.autofit_col_width(1, None).unwrap());
+    let area = Area { sheet: 0, row: 1, column: 1, width: 1, height: 1 };
+    book.set_cell_style(&[("num_fmt", "$#,##0.00")], &area).unwrap();
+    assert_eq!("$12.00", book.get_cell_addr_rendered(&Address { sheet: 0, row: 1, col: 1 }).unwrap());
+    assert_eq!(Some(6), book.autofit_col_width(1, None).unwrap());
+    // A formula's result, not its source.
+    let shown = book.get_cell_addr_rendered(&Address { sheet: 0, row: 1, col: 2 }).unwrap();
+    assert!(shown.len() > 4, "{shown}");
+    assert_eq!(Some(shown.len()), book.autofit_col_width(2, None).unwrap());
+}
+
+#[test]
+fn test_autofit_width_clamps() {
+    let book = autofit_book(&[(1, 1, &"x".repeat(100)), (1, 2, "x")]);
+    assert_eq!(Some(60), book.autofit_col_width(1, None).unwrap());
+    assert_eq!(Some(3), book.autofit_col_width(2, None).unwrap());
+}
+
+#[test]
+fn test_autofit_width_counts_offscreen_rows_and_honors_row_range() {
+    let book = autofit_book(&[(1, 1, "a"), (500, 1, "twelve chars"), (3, 1, "mid")]);
+    assert_eq!(Some(12), book.autofit_col_width(1, None).unwrap());
+    assert_eq!(Some(3), book.autofit_col_width(1, Some(1..=3)).unwrap());
+    assert_eq!(None, book.autofit_col_width(1, Some(10..=20)).unwrap());
+}
+
+#[test]
+fn test_autofit_width_skips_merged_cells() {
+    let mut model = Model::new_empty("m", "en", "America/New_York", "en").unwrap();
+    model.workbook.worksheets[0].merge_cells.push("A1:B2".to_string());
+    let mut book = Book::from_model(model);
+    book.update_cell(&Address { sheet: 0, row: 1, col: 1 }, "a very long merged cell").unwrap();
+    book.update_cell(&Address { sheet: 0, row: 3, col: 1 }, "short").unwrap();
+    assert_eq!(Some(5), book.autofit_col_width(1, None).unwrap());
+    // A column holding only merged cells has nothing to measure.
+    assert_eq!(None, book.autofit_col_width(2, None).unwrap());
+}
+
+#[test]
+fn test_autofit_cols_resets_empty_columns_and_is_one_undo_step() {
+    let mut book = autofit_book(&[(1, 1, "hello world"), (1, 3, "x")]);
+    book.set_col_widths(1, 3, 40).unwrap();
+    let report = book.autofit_cols(1, 3, None).unwrap();
+    assert_eq!(AutofitReport { fitted: 2, empty: 1 }, report);
+    assert_eq!(11, book.get_col_size(1).unwrap());
+    assert_eq!(DEFAULT_COL_WIDTH, book.get_col_size(2).unwrap());
+    assert_eq!(3, book.get_col_size(3).unwrap());
+    assert!(book.undo().unwrap());
+    for c in 1..=3 {
+        assert_eq!(40, book.get_col_size(c).unwrap());
+    }
+}
+
+#[test]
+fn test_autofit_cols_past_the_last_column_changes_nothing() {
+    let mut book = Book::default();
+    let last = crate::book::LAST_COLUMN as usize;
+    let before = book.get_col_size(last).unwrap();
+    assert!(book.autofit_cols(last, 2, None).is_err());
+    assert!(book.autofit_cols(1, 0, None).is_err());
     assert_eq!(before, book.get_col_size(last).unwrap());
     assert!(!book.undo().unwrap());
 }

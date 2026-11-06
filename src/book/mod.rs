@@ -8,6 +8,9 @@ mod undo;
 use undo::UndoHistory;
 
 use std::cmp::max;
+use std::ops::RangeInclusive;
+use ironcalc::base::expressions::utils::parse_reference_a1;
+use unicode_width::UnicodeWidthStr;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Result};
@@ -42,6 +45,20 @@ use crate::ui::Address;
 mod test;
 
 pub(crate) const COL_PIXELS: f64 = 5.0;
+
+/// The width, in characters, of a column with no width of its own.
+pub const DEFAULT_COL_WIDTH: usize = 18;
+/// The narrowest and widest column `:autofit-cols` produces.
+pub const AUTOFIT_MIN: usize = 3;
+pub const AUTOFIT_MAX: usize = 60;
+
+/// What `:autofit-cols` did: how many columns it fitted to their contents
+/// and how many it reset to the default because they had nothing to measure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AutofitReport {
+    pub fitted: usize,
+    pub empty: usize,
+}
 // NOTE(zaphar): This is stolen from ironcalc but ironcalc doesn't expose it
 // publically.
 pub(crate) const LAST_COLUMN: i32 = 16_384;
@@ -1170,6 +1187,73 @@ impl Book {
         })
     }
 
+    /// The width, in terminal cells, that fits the displayed text of the
+    /// column's cells, or `None` if there is nothing to measure. Merged cells
+    /// are skipped. `rows` limits the rows measured; `None` measures them all.
+    pub fn autofit_col_width(
+        &self,
+        col: usize,
+        rows: Option<RangeInclusive<usize>>,
+    ) -> Result<Option<usize>> {
+        let sheet = self.location.sheet;
+        let worksheet = self.get_sheet()?;
+        let merged = merged_ranges(worksheet);
+        let mut widest: Option<usize> = None;
+        for (row, cells) in worksheet.sheet_data.iter() {
+            if !cells.contains_key(&(col as i32)) || *row < 1 {
+                continue;
+            }
+            if rows.as_ref().is_some_and(|r| !r.contains(&(*row as usize))) {
+                continue;
+            }
+            if merged.iter().any(|(r1, c1, r2, c2)| {
+                (*r1..=*r2).contains(row) && (*c1..=*c2).contains(&(col as i32))
+            }) {
+                continue;
+            }
+            let text = self.get_cell_addr_rendered(&Address {
+                sheet,
+                row: *row as usize,
+                col,
+            })?;
+            let width = text.lines().map(UnicodeWidthStr::width).max().unwrap_or(0);
+            if width > 0 {
+                widest = Some(widest.map_or(width, |w| w.max(width)));
+            }
+        }
+        Ok(widest.map(|w| w.clamp(AUTOFIT_MIN, AUTOFIT_MAX)))
+    }
+
+    /// Fit `count` columns, from `first` going right, to their contents as one
+    /// undo step. A column with nothing to measure is reset to the default
+    /// width. Nothing changes if the columns run past the last column.
+    pub fn autofit_cols(
+        &mut self,
+        first: usize,
+        count: usize,
+        rows: Option<RangeInclusive<usize>>,
+    ) -> Result<AutofitReport> {
+        if count == 0 || first + count - 1 > LAST_COLUMN as usize {
+            return Err(anyhow!("The columns run past column {LAST_COLUMN}"));
+        }
+        let mut widths = Vec::with_capacity(count);
+        for col in first..first + count {
+            widths.push((col, self.autofit_col_width(col, rows.clone())?));
+        }
+        let sheet = self.location.sheet;
+        let report = AutofitReport {
+            fitted: widths.iter().filter(|(_, w)| w.is_some()).count(),
+            empty: widths.iter().filter(|(_, w)| w.is_none()).count(),
+        };
+        self.as_action(|book| {
+            for (col, width) in widths {
+                book.set_column_size_for_sheet(sheet, col, width.unwrap_or(DEFAULT_COL_WIDTH))?;
+            }
+            Ok(())
+        })?;
+        Ok(report)
+    }
+
     // Get the size of the current sheet as a `(row_count, column_count)`
     pub fn get_size(&self) -> Result<(usize, usize)> {
         let sheet = &self.get_sheet()?.sheet_data;
@@ -1341,4 +1425,17 @@ pub fn shrink_freeze(first: usize, count: usize, frozen: usize) -> usize {
     }
     let inside = (first + count - 1).min(frozen) - first + 1;
     frozen - inside
+}
+
+/// The merged ranges of a sheet as `(first row, first col, last row, last col)`.
+fn merged_ranges(worksheet: &Worksheet) -> Vec<(i32, i32, i32, i32)> {
+    worksheet
+        .merge_cells
+        .iter()
+        .filter_map(|range| {
+            let mut ends = range.split(':').filter_map(parse_reference_a1);
+            let (a, b) = (ends.next()?, ends.next()?);
+            Some((a.row, a.column, b.row, b.column))
+        })
+        .collect()
 }
