@@ -38,6 +38,10 @@ pub enum Cmd<'a> {
     /// `:underline` and `:strike`: the attribute words, still to parse with
     /// [`parse_style_attrs`].
     Style(&'a str),
+    /// `:style-cols [count] <attr>...` and `:style-rows`: the count is `None`
+    /// when not written; the words are still to parse.
+    StyleCols(Option<usize>, &'a str),
+    StyleRows(Option<usize>, &'a str),
     /// `:decimals <+n|-n|n>`: add, remove or set decimal places.
     Decimals(DecimalsChange),
     RenameSheet(Option<usize>, &'a str),
@@ -181,6 +185,12 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_format_span(cursor.clone(), "format-rows")? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_style_span(cursor.clone(), "style-cols")? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_style_span(cursor.clone(), "style-rows")? {
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_style(cursor.clone())? {
@@ -380,6 +390,39 @@ fn try_consume_style<'cmd, 'i: 'cmd>(
         return Err(USAGE);
     }
     Ok(Some(Cmd::Style(rest)))
+}
+
+/// `style-cols` and `style-rows`: `[count] <attr>...`. The count comes first
+/// and only when an attribute follows it.
+fn try_consume_style_span<'cmd, 'i: 'cmd>(
+    input: StrCursor<'i>,
+    long: &'static str,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    let cols = long == "style-cols";
+    let usage = if cols {
+        "Usage: style-cols [count] <attr>..."
+    } else {
+        "Usage: style-rows [count] <attr>..."
+    };
+    if !compare(input.clone(), long) {
+        return Ok(None);
+    }
+    let Some(arg) = command_args(&input, long) else {
+        return Err(usage);
+    };
+    let (word, rest) = match arg.split_once(char::is_whitespace) {
+        Some((w, r)) => (w, r.trim()),
+        None => (arg, ""),
+    };
+    let (count, words) = if !rest.is_empty() && word.bytes().all(|b| b.is_ascii_digit()) {
+        (Some(word.parse::<usize>().map_err(|_| usage)?), rest)
+    } else {
+        (None, arg)
+    };
+    if words.is_empty() || words.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(usage);
+    }
+    Ok(Some(if cols { Cmd::StyleCols(count, words) } else { Cmd::StyleRows(count, words) }))
 }
 
 /// The trimmed text after command `name` when the input is that command

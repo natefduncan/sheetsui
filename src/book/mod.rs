@@ -1055,10 +1055,20 @@ impl Book {
             row: area.row as usize,
             col: area.column as usize,
         };
+        self.apply_style_decided_by(area, &first, attrs)
+    }
+
+    /// As [`Book::apply_style`], with toggles decided from `decider`.
+    fn apply_style_decided_by(
+        &mut self,
+        area: &Area,
+        decider: &Address,
+        attrs: &[StyleAttr],
+    ) -> Result<Vec<(StyleFlag, bool)>> {
         let done: Vec<(StyleFlag, bool)> = attrs
             .iter()
             .map(|attr| match *attr {
-                StyleAttr::Toggle(flag) => (flag, !self.cell_has_style(&first, flag)),
+                StyleAttr::Toggle(flag) => (flag, !self.cell_has_style(decider, flag)),
                 StyleAttr::Set(flag, on) => (flag, on),
             })
             .collect();
@@ -1068,6 +1078,52 @@ impl Book {
             .collect();
         self.set_cell_style(&style, area)?;
         Ok(done)
+    }
+
+    /// Apply font attributes to `count` whole columns from `first` on the
+    /// current sheet as one undo step, keeping each cell's other style.
+    /// Toggles are decided from `decider`. A count of 0 or columns past the
+    /// last one are an error and change nothing.
+    pub fn apply_style_cols(
+        &mut self,
+        first: usize,
+        count: usize,
+        decider: &Address,
+        attrs: &[StyleAttr],
+    ) -> Result<Vec<(StyleFlag, bool)>> {
+        if first == 0 || count == 0 || first + count - 1 > LAST_COLUMN as usize {
+            return Err(anyhow!("The columns run past column {LAST_COLUMN}"));
+        }
+        let area = Area {
+            sheet: self.location.sheet,
+            row: 1,
+            column: first as i32,
+            width: count as i32,
+            height: LAST_ROW,
+        };
+        self.apply_style_decided_by(&area, decider, attrs)
+    }
+
+    /// Apply font attributes to `count` whole rows from `first`, as
+    /// [`Book::apply_style_cols`] does for columns.
+    pub fn apply_style_rows(
+        &mut self,
+        first: usize,
+        count: usize,
+        decider: &Address,
+        attrs: &[StyleAttr],
+    ) -> Result<Vec<(StyleFlag, bool)>> {
+        if first == 0 || count == 0 || first + count - 1 > LAST_ROW as usize {
+            return Err(anyhow!("The rows run past row {LAST_ROW}"));
+        }
+        let area = Area {
+            sheet: self.location.sheet,
+            row: first as i32,
+            column: 1,
+            width: LAST_COLUMN,
+            height: count as i32,
+        };
+        self.apply_style_decided_by(&area, decider, attrs)
     }
 
     /// Set the number format of every cell in `area`, empty and text cells

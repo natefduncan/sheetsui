@@ -6332,3 +6332,77 @@ fn test_style_cmd_unknown_word_changes_nothing() {
     assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
     assert!(popup_text(&ws).contains("Usage: style <attr>..."));
 }
+
+#[test]
+fn test_style_span_cmd_parse() {
+    assert_eq!(Cmd::StyleCols(None, "bold"), parse("style-cols bold").unwrap().unwrap());
+    assert_eq!(Cmd::StyleCols(Some(3), "bold"), parse("style-cols 3 bold").unwrap().unwrap());
+    assert_eq!(Cmd::StyleRows(Some(2), "bold nounderline"), parse("style-rows 2 bold nounderline").unwrap().unwrap());
+    assert_eq!(Cmd::StyleRows(None, "italic"), parse("style-rows italic").unwrap().unwrap());
+    assert_eq!(Err("Usage: style-cols [count] <attr>..."), parse("style-cols"));
+    assert_eq!(Err("Usage: style-cols [count] <attr>..."), parse("style-cols 3"));
+    assert_eq!(Err("Usage: style-rows [count] <attr>..."), parse("style-rows  "));
+    assert_eq!(Err("Usage: style-rows [count] <attr>..."), parse("style-rowsx"));
+}
+
+#[test]
+fn test_style_cols_cursor_count_message_one_undo() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "style-cols bold");
+    assert!(has_style(&ws, 1, 1, StyleFlag::Bold) && has_style(&ws, 500, 1, StyleFlag::Bold));
+    assert!(!has_style(&ws, 1, 2, StyleFlag::Bold));
+    assert_eq!(Some("Bold: column A".to_owned()), last_message(&ws));
+    run_command(&mut ws, "style-cols 3 italic");
+    for c in 1..=3 {
+        assert!(has_style(&ws, 7, c, StyleFlag::Italic), "{c}");
+    }
+    assert!(!has_style(&ws, 7, 4, StyleFlag::Italic));
+    assert_eq!(Some("Italic: columns A:C".to_owned()), last_message(&ws));
+    run_command(&mut ws, "undo");
+    assert!(!has_style(&ws, 7, 1, StyleFlag::Italic));
+    assert!(has_style(&ws, 7, 1, StyleFlag::Bold));
+}
+
+#[test]
+fn test_style_cols_toggle_decided_by_cursor_cell_and_keeps_format() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "format-cols percent");
+    // Bold only the cursor cell A1: the column toggle then clears bold.
+    run_command(&mut ws, "bold");
+    run_command(&mut ws, "style-cols bold");
+    assert!(!has_style(&ws, 1, 1, StyleFlag::Bold));
+    assert_eq!("0.00%", fmt_of(&ws, 9, 1));
+}
+
+#[test]
+fn test_style_rows_cursor_and_count() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "style-rows 2 underline");
+    assert!(has_style(&ws, 1, 1, StyleFlag::Underline) && has_style(&ws, 2, 300, StyleFlag::Underline));
+    assert!(!has_style(&ws, 3, 1, StyleFlag::Underline));
+    assert_eq!(Some("Underline: rows 1:2".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_style_span_errors_change_nothing() {
+    let mut ws = new_workspace();
+    for cmd in ["style-cols 0 bold", "style-cols 16385 bold", "style-rows 0 bold", "style-rows 1048577 bold"] {
+        run_command(&mut ws, cmd);
+        assert_eq!(super::MessageLevel::Error, ws.state.message.as_ref().unwrap().level, "{cmd}");
+        assert!(!has_style(&ws, 1, 1, StyleFlag::Bold), "{cmd}");
+    }
+    run_command(&mut ws, "style-cols bold shiny");
+    assert_eq!(Some("Unknown style: shiny".to_owned()), last_message(&ws));
+    assert!(!has_style(&ws, 1, 1, StyleFlag::Bold));
+}
+
+#[test]
+fn test_style_cols_range_select_ignores_count() {
+    let mut ws = new_workspace();
+    script().chars("l").char('v').chars("jjl").char(':').chars("style-cols 9 bold").enter()
+        .run(&mut ws).expect("script");
+    assert!(!has_style(&ws, 1, 1, StyleFlag::Bold));
+    assert!(has_style(&ws, 1, 2, StyleFlag::Bold) && has_style(&ws, 900, 3, StyleFlag::Bold));
+    assert!(!has_style(&ws, 1, 4, StyleFlag::Bold));
+    assert_eq!(Some("Bold: columns B:C".to_owned()), last_message(&ws));
+}

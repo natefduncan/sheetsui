@@ -2804,3 +2804,47 @@ fn test_typing_into_a_styled_empty_cell_keeps_its_style() {
     book.update_cell(&phase2_addr(2, 2), "typed").expect("set");
     assert!(book.cell_has_style(&phase2_addr(2, 2), StyleFlag::Bold));
 }
+
+#[test]
+fn test_apply_style_cols_keeps_fill_and_format_and_round_trips() {
+    let mut book = Book::default();
+    let area = Area { sheet: 0, row: 1, column: 2, width: 1, height: LAST_ROW };
+    book.set_cell_style(&[("fill.color", "#ff0000"), ("num_fmt", "0.00%")], &area).expect("setup");
+    let decider = phase2_addr(1, 2);
+    let done = book
+        .apply_style_cols(2, 2, &decider, &[StyleAttr::Toggle(StyleFlag::Bold)])
+        .expect("style cols");
+    assert_eq!(vec![(StyleFlag::Bold, true)], done);
+    for (r, c) in [(1, 2), (900, 2), (5, 3)] {
+        assert!(book.cell_has_style(&phase2_addr(r, c), StyleFlag::Bold), "{r}:{c}");
+    }
+    assert!(!book.cell_has_style(&phase2_addr(1, 4), StyleFlag::Bold));
+    assert_eq!(Some("0.00%".to_string()), book.get_number_format(&phase2_addr(7, 2)));
+    let fill = book.get_cell_style(&phase2_addr(7, 2)).unwrap().fill.color;
+    assert!(matches!(&fill, ironcalc::base::types::Color::Rgb(c) if c.eq_ignore_ascii_case("#ff0000")), "{fill:?}");
+
+    for name in ["style_cols_rt.sui", "style_cols_rt.xlsx"] {
+        let path = tmp_path(name);
+        book.save_as(&path).expect("save");
+        let loaded = Book::load(&path, "en", "America/New_York").expect("load");
+        assert!(loaded.cell_has_style(&phase2_addr(1, 3), StyleFlag::Bold), "{name}");
+        assert!(loaded.cell_has_style(&phase2_addr(1000, 2), StyleFlag::Bold), "{name}");
+        assert!(!loaded.cell_has_style(&phase2_addr(1, 4), StyleFlag::Bold), "{name}");
+        std::fs::remove_file(&path).ok();
+    }
+}
+
+#[test]
+fn test_apply_style_rows_and_bounds() {
+    let mut book = Book::default();
+    let d = phase2_addr(1, 1);
+    let attrs = [StyleAttr::Toggle(StyleFlag::Italic)];
+    book.apply_style_rows(2, 2, &d, &attrs).expect("rows");
+    assert!(book.cell_has_style(&phase2_addr(2, 1), StyleFlag::Italic));
+    assert!(book.cell_has_style(&phase2_addr(3, 300), StyleFlag::Italic));
+    assert!(!book.cell_has_style(&phase2_addr(4, 1), StyleFlag::Italic));
+    assert!(book.apply_style_rows(0, 1, &d, &attrs).is_err());
+    assert!(book.apply_style_rows(1, 0, &d, &attrs).is_err());
+    assert!(book.apply_style_rows(LAST_ROW as usize, 2, &d, &attrs).is_err());
+    assert!(book.apply_style_cols(LAST_COLUMN as usize, 2, &d, &attrs).is_err());
+}

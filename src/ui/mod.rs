@@ -1036,6 +1036,14 @@ impl<'ws> Workspace<'ws> {
                 self.style_cells(words);
                 Ok(None)
             }
+            Ok(Some(Cmd::StyleCols(count, words))) => {
+                self.style_span(true, count, words);
+                Ok(None)
+            }
+            Ok(Some(Cmd::StyleRows(count, words))) => {
+                self.style_span(false, count, words);
+                Ok(None)
+            }
             Ok(Some(Cmd::Decimals(change))) => {
                 self.change_decimals(change);
                 Ok(None)
@@ -1774,6 +1782,64 @@ impl<'ws> Workspace<'ws> {
                 self.set_message(MessageLevel::Info, format!("{}: {what}", style_summary(&done)));
             }
             Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
+        }
+    }
+
+    /// `:style-cols` and `:style-rows`. In range select the columns or rows
+    /// the selection touches, ignoring `count`; else `count` from the cursor.
+    /// Toggles are decided by the cursor cell (the first selected cell in
+    /// range select).
+    fn style_span(&mut self, cols: bool, count: Option<usize>, words: &str) {
+        if self.in_cell_edit_range_select() {
+            return;
+        }
+        let usage = if cols {
+            "Usage: style-cols [count] <attr>..."
+        } else {
+            "Usage: style-rows [count] <attr>..."
+        };
+        let attrs = match cmd::parse_style_attrs(words) {
+            Ok(attrs) => attrs,
+            Err(e) => return self.set_message(MessageLevel::Error, e),
+        };
+        let loc = self.book.location.clone();
+        let (first, count, decider) = match self.fill_selection() {
+            Some((a, b)) => {
+                let decider = Address { sheet: loc.sheet, row: a.row.min(b.row), col: a.col.min(b.col) };
+                if cols {
+                    (decider.col, a.col.max(b.col) - decider.col + 1, decider)
+                } else {
+                    (decider.row, a.row.max(b.row) - decider.row + 1, decider)
+                }
+            }
+            None => (
+                if cols { loc.col } else { loc.row },
+                count.unwrap_or(1),
+                loc,
+            ),
+        };
+        let result = if cols {
+            self.book.apply_style_cols(first, count, &decider, &attrs)
+        } else {
+            self.book.apply_style_rows(first, count, &decider, &attrs)
+        };
+        match result {
+            Ok(done) => {
+                let name = |i: usize| {
+                    if cols { number_to_column(i as i32).unwrap_or_default() } else { i.to_string() }
+                };
+                let kind = if cols { "column" } else { "row" };
+                let what = if count == 1 {
+                    format!("{kind} {}", name(first))
+                } else {
+                    format!("{kind}s {}:{}", name(first), name(first + count - 1))
+                };
+                self.set_message(MessageLevel::Info, format!("{}: {what}", style_summary(&done)));
+            }
+            Err(_) => self.set_message(
+                MessageLevel::Error,
+                format!("{usage}: the count must be at least 1 and stay within the sheet"),
+            ),
         }
     }
 
