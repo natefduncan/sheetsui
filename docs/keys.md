@@ -104,6 +104,16 @@ Shift together on a letter, `<C-S-x>`, cannot be mapped: most terminals do
 not send it. The built-in copy keys use it where a terminal does, and it
 shows in the help as `<C-S-c>`.
 
+That is why the number format keys are not Excel's own. Excel uses
+Ctrl+Shift with 1 to 6 and a terminal cannot send that, so the keys here are
+Alt and the same digit: `<A-4>` is currency where Excel has Ctrl+Shift+4.
+They need a terminal that reports Alt with a digit, `.` or `,`. Most send
+Escape and then the character, which is read as Alt. In macOS Terminal.app
+turn on "Use Option as Meta key", and in iTerm2 set Option to "Esc+". If your
+terminal does not report them, map other keys, for example
+`nnoremap <Space>4 <Cmd>format currency<CR>`. These keys were tested only as
+key events in the test suite, not in each terminal.
+
 ## What a mapping runs
 
 The right-hand side is a list of keys and commands:

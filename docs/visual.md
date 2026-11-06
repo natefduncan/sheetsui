@@ -35,3 +35,5 @@ the range reference will be placed into the cell contents you are editing.
 <aside>We only support continuous ranges for the moment. Planned for
 discontinuous ranges still needs the interaction interface to be
 determined.</aside>
+
+`<A-1>` to `<A-6>` and `<A-0>` set the number format of the selected cells (number, time, date, currency, percent, scientific, general), and `<A-.>` and `<A-,>` add and remove a decimal place. `:format` and `:decimals` apply to exactly the selected cells, and `:format-cols` and `:format-rows` to every column or row the selection touches. See [Number formats](./command.md#number-formats).

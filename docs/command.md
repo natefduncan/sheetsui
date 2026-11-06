@@ -68,6 +68,47 @@ The currently supported commands are:
 
 Inserting rows at or above the last frozen row (or columns at or left of the last frozen column) grows the freeze by the number inserted. Inserting below or right of the freeze leaves it alone. Undoing an insert does not change the freeze.
 
+## Number formats
+
+`:format`, `:format-cols`, `:format-rows` and `:decimals` control how a number is shown. They change the display format only: typing still decides whether a cell holds a number or text. The format is saved in `.sui` and `.xlsx` files.
+
+| Preset | Code | Key |
+|--------|------|-----|
+| `general` | `General` | `<A-0>` |
+| `number` | `0.00` | `<A-1>` |
+| `integer` | `0` | |
+| `thousands` | `#,##0` | |
+| `currency` | `$#,##0.00` | `<A-4>` |
+| `percent` | `0.00%` | `<A-5>` |
+| `date` | `yyyy-mm-dd` | `<A-3>` |
+| `time` | `hh:mm:ss` | `<A-2>` |
+| `scientific` | `0.00E+00` | `<A-6>` |
+
+The keys work in navigation and range select mode, and `<A-.>` and `<A-,>` add and remove a decimal place. See [Key notation](./keys.md#key-notation) for why they use Alt.
+
+Anything that is not a preset name is a raw Excel format code. It is everything after the command (or after the count), so spaces and quotes are part of it:
+
+```
+:format
+:format currency
+:format 0.00 "USD"
+:format-cols percent
+:format-cols 3 percent
+:format-rows 2 0.000
+:decimals +1
+:decimals -1
+:decimals 3
+```
+
+* A raw code is checked before it is used, by formatting a sample number with it. A bad code is the error `Invalid number format: <code>`, and nothing changes, including later cells of a range.
+* A format applies to every cell in the area, including empty and text cells. A number typed later into a formatted empty cell shows with that format. Text shows no change.
+* `format-cols` and `format-rows` replace the format of cells in the column or row that already have their own.
+* A format never changes a column width. A number that does not fit shows `###`: use `gw` to fit the column.
+* Every command is one undo step and says what it did, for example `Format currency: 12 cells`, `Format 0.000: column C` or `Decimals +1: 12 cells`.
+* `decimals` reads the cursor cell's format (the first selected cell in range select mode) and applies the one result to the whole area. Only the first section of the code, before any `;`, is read. A code with no `.` gets one when you add decimals, and `-1` on a format with no decimals leaves it alone.
+
+**Typing into a formatted cell.** Typing a plain number keeps the cell's format. Typing a value that carries its own format, such as `5%` or `$12`, gives the cell the format that value implies and drops the one you set (`5%` in a currency cell becomes `#,##0%`). These commands do not change that, or copy and paste. Fill copies formats.
+
 ## Column widths
 
 A width is a number of terminal characters, from 1 to 255. `:col-width`, `:autofit-cols`, `<C-l>` and `<C-h>` all keep to that range. `<C-l>` stops at 255 and `<C-h>` at 1; at the limit the key does nothing and says nothing.

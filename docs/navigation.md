@@ -51,6 +51,8 @@ will clear the numeric prefix if you want to cancel it.
 
 `<C-d>` fills down and `<C-r>` fills right: the cell above (or to the left) is copied onto the cursor cell, and `5<C-d>` fills five cells. The cursor does not move. `:fill-series` continues a series. See [Filling](./command.md#filling). Entering range select mode is `<A-r>`; `<C-r>` used to do that.
 
+`<A-1>` to `<A-6>` and `<A-0>` format the cursor cell as number, time, date, currency, percent, scientific and general. `<A-.>` adds a decimal place and `<A-,>` removes one. `:format`, `:format-cols`, `:format-rows` and `:decimals` do the same with more choices. See [Number formats](./command.md#number-formats).
+
 ## Undo and Redo
 
 {{keys:undo}}

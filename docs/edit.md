@@ -12,7 +12,8 @@ Typing a number will treat the contents as a number. While typing non-numeric
 text will treat it as text content.
 
 <aside>We do not yet support modifying the type of a cell after the fact. We
-may add this in the future.</aside>
+may add this in the future. To change how a number is shown, as currency, a
+percent or a date, use `:format`. See [Number formats](./command.md#number-formats).</aside>
 
 For the most part this should work the same way you expect a spreadsheet to
 work.
