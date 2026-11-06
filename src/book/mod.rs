@@ -1155,6 +1155,58 @@ impl Book {
         self.apply_style_decided_by(&area, decider, attrs)
     }
 
+    /// Reset every visual style of every cell in `area` to the default, as
+    /// Excel's Clear Formats does: bold, italic, underline, strikethrough,
+    /// font color, fill, alignment (all of it, wrap and vertical too) and
+    /// number format. Cell values are untouched. One undo step.
+    pub fn clear_style(&mut self, area: &Area) -> Result<()> {
+        self.set_cell_style(
+            &[
+                ("font.b", "false"),
+                ("font.i", "false"),
+                ("font.u", "false"),
+                ("font.strike", "false"),
+                ("font.color", ""),
+                ("fill.color", ""),
+                ("alignment", ""),
+                ("num_fmt", "General"),
+            ],
+            area,
+        )
+    }
+
+    /// [`Book::clear_style`] on `count` whole columns from `first` on the
+    /// current sheet. A count of 0 or columns past the last one are an error
+    /// and change nothing.
+    pub fn clear_style_cols(&mut self, first: usize, count: usize) -> Result<()> {
+        if first == 0 || count == 0 || first + count - 1 > LAST_COLUMN as usize {
+            return Err(anyhow!("The columns run past column {LAST_COLUMN}"));
+        }
+        let area = Area {
+            sheet: self.location.sheet,
+            row: 1,
+            column: first as i32,
+            width: count as i32,
+            height: LAST_ROW,
+        };
+        self.clear_style(&area)
+    }
+
+    /// [`Book::clear_style`] on `count` whole rows from `first`.
+    pub fn clear_style_rows(&mut self, first: usize, count: usize) -> Result<()> {
+        if first == 0 || count == 0 || first + count - 1 > LAST_ROW as usize {
+            return Err(anyhow!("The rows run past row {LAST_ROW}"));
+        }
+        let area = Area {
+            sheet: self.location.sheet,
+            row: first as i32,
+            column: 1,
+            width: LAST_COLUMN,
+            height: count as i32,
+        };
+        self.clear_style(&area)
+    }
+
     /// Set the number format of every cell in `area`, empty and text cells
     /// included, as one undo step. The code is checked first with
     /// [`check_number_format`], so a bad code changes nothing.

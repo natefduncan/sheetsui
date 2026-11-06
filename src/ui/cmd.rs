@@ -42,6 +42,12 @@ pub enum Cmd<'a> {
     /// when not written; the words are still to parse.
     StyleCols(Option<usize>, &'a str),
     StyleRows(Option<usize>, &'a str),
+    /// `:clear-style`: reset every visual style of the cursor cell or selection.
+    ClearStyle,
+    /// `:clear-style-cols [count]` and `:clear-style-rows [count]`: the count
+    /// is `None` when not written.
+    ClearStyleCols(Option<usize>),
+    ClearStyleRows(Option<usize>),
     /// `:align left|center|right|general`: the alignment word.
     Align(&'a str),
     /// `:font-color <color>`: the color text, parsed by the UI.
@@ -195,6 +201,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_style_span(cursor.clone(), "style-rows")? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_clear_style(cursor.clone())? {
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_style_alias(cursor.clone())? {
@@ -414,6 +423,29 @@ fn try_consume_style_alias<'cmd, 'i: 'cmd>(
             return Err("Usage: font-color <color>");
         }
         return Ok(Some(Cmd::FontColor(rest)));
+    }
+    Ok(None)
+}
+
+/// `clear-style`, `clear-style-cols [count]` and `clear-style-rows [count]`.
+fn try_consume_clear_style<'cmd, 'i: 'cmd>(
+    input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    if let Some(rest) = command_args(&input, "clear-style") {
+        return if rest.is_empty() { Ok(Some(Cmd::ClearStyle)) } else { Err("Usage: clear-style") };
+    }
+    for (name, cols, usage) in [
+        ("clear-style-cols", true, "Usage: clear-style-cols [count]"),
+        ("clear-style-rows", false, "Usage: clear-style-rows [count]"),
+    ] {
+        if let Some(rest) = command_args(&input, name) {
+            let count = if rest.is_empty() {
+                None
+            } else {
+                Some(rest.parse::<usize>().map_err(|_| usage)?)
+            };
+            return Ok(Some(if cols { Cmd::ClearStyleCols(count) } else { Cmd::ClearStyleRows(count) }));
+        }
     }
     Ok(None)
 }

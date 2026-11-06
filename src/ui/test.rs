@@ -6492,3 +6492,47 @@ fn test_font_color_cmd_sets_and_rejects_bad_color() {
     run_command(&mut ws, "style color=blue shiny");
     assert_eq!(Color::Rgb("#00ff00".to_string()), cell_style_of(&ws, 1, 1).font.color);
 }
+
+#[test]
+fn test_clear_style_cmd_parse() {
+    assert_eq!(Cmd::ClearStyle, parse("clear-style").unwrap().unwrap());
+    assert_eq!(Cmd::ClearStyleCols(None), parse("clear-style-cols").unwrap().unwrap());
+    assert_eq!(Cmd::ClearStyleCols(Some(2)), parse("clear-style-cols 2").unwrap().unwrap());
+    assert_eq!(Cmd::ClearStyleRows(None), parse("clear-style-rows").unwrap().unwrap());
+    assert_eq!(Cmd::ClearStyleRows(Some(3)), parse("clear-style-rows 3").unwrap().unwrap());
+    assert_eq!(Err("Usage: clear-style"), parse("clear-style now"));
+    assert_eq!(Err("Usage: clear-style-cols [count]"), parse("clear-style-cols x"));
+    assert_eq!(Err("Usage: clear-style-rows [count]"), parse("clear-style-rows 1 2"));
+}
+
+#[test]
+fn test_clear_style_cmd_cursor_cell_message_and_undo() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "style bold underline center color=red");
+    run_command(&mut ws, "format percent");
+    run_command(&mut ws, "clear-style");
+    assert!(!has_style(&ws, 1, 1, StyleFlag::Bold) && !has_style(&ws, 1, 1, StyleFlag::Underline));
+    assert_eq!(None, halign_of(&ws, 1, 1));
+    assert_eq!("General", fmt_of(&ws, 1, 1));
+    assert_eq!(Some("Cleared style: 1 cell".to_owned()), last_message(&ws));
+    run_command(&mut ws, "undo");
+    assert!(has_style(&ws, 1, 1, StyleFlag::Bold));
+    assert_eq!("0.00%", fmt_of(&ws, 1, 1));
+}
+
+#[test]
+fn test_clear_style_cols_and_rows_cmds() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "style-cols 3 bold");
+    run_command(&mut ws, "clear-style-cols 2");
+    assert!(!has_style(&ws, 40, 1, StyleFlag::Bold) && !has_style(&ws, 40, 2, StyleFlag::Bold));
+    assert!(has_style(&ws, 40, 3, StyleFlag::Bold));
+    assert_eq!(Some("Cleared style: columns A:B".to_owned()), last_message(&ws));
+    run_command(&mut ws, "style-rows 2 italic");
+    run_command(&mut ws, "clear-style-rows");
+    assert!(!has_style(&ws, 1, 50, StyleFlag::Italic));
+    assert!(has_style(&ws, 2, 50, StyleFlag::Italic));
+    assert_eq!(Some("Cleared style: row 1".to_owned()), last_message(&ws));
+    run_command(&mut ws, "clear-style-cols 0");
+    assert_eq!(super::MessageLevel::Error, ws.state.message.as_ref().unwrap().level);
+}

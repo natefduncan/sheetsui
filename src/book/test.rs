@@ -2848,3 +2848,91 @@ fn test_apply_style_rows_and_bounds() {
     assert!(book.apply_style_rows(LAST_ROW as usize, 2, &d, &attrs).is_err());
     assert!(book.apply_style_cols(LAST_COLUMN as usize, 2, &d, &attrs).is_err());
 }
+
+fn styled_book() -> Book {
+    let mut book = csv_book("a,1\nb,2\n");
+    let area = Area { sheet: 0, row: 1, column: 1, width: 2, height: 2 };
+    book.set_cell_style(
+        &[
+            ("font.b", "true"),
+            ("font.i", "true"),
+            ("font.u", "true"),
+            ("font.strike", "true"),
+            ("font.color", "#00ff00"),
+            ("fill.color", "#ff0000"),
+            ("alignment.horizontal", "center"),
+            ("alignment.wrap_text", "true"),
+            ("num_fmt", "0.00%"),
+        ],
+        &area,
+    )
+    .expect("style");
+    book
+}
+
+fn assert_default_style(book: &Book, row: usize, col: usize) {
+    let s = book.get_cell_style(&phase2_addr(row, col)).expect("style");
+    let tag = format!("{row}:{col}");
+    assert!(!s.font.b && !s.font.i && !s.font.u && !s.font.strike, "{tag}");
+    assert_eq!(ironcalc::base::types::Color::None, s.font.color, "{tag}");
+    assert_eq!(ironcalc::base::types::Color::None, s.fill.color, "{tag}");
+    assert!(s.alignment.is_none(), "{tag}");
+    assert_eq!("general", s.num_fmt.to_lowercase(), "{tag}");
+}
+
+#[test]
+fn test_clear_style_resets_every_path_and_keeps_values() {
+    let mut book = styled_book();
+    let area = Area { sheet: 0, row: 1, column: 1, width: 1, height: 2 };
+    book.clear_style(&area).expect("clear");
+    assert_default_style(&book, 1, 1);
+    assert_default_style(&book, 2, 1);
+    // Outside the area is untouched.
+    assert!(book.cell_has_style(&phase2_addr(1, 2), StyleFlag::Bold));
+    assert_eq!("a", book.get_cell_addr_contents(&phase2_addr(1, 1)).unwrap());
+    assert_eq!("2", book.get_cell_addr_contents(&phase2_addr(2, 2)).unwrap());
+}
+
+#[test]
+fn test_clear_style_on_unstyled_cells_is_fine() {
+    let mut book = Book::default();
+    let area = Area { sheet: 0, row: 5, column: 5, width: 2, height: 2 };
+    book.clear_style(&area).expect("clear");
+    assert_default_style(&book, 5, 5);
+}
+
+#[test]
+fn test_clear_style_cols_and_rows_and_bounds() {
+    let mut book = Book::default();
+    let area = Area { sheet: 0, row: 1, column: 1, width: 3, height: LAST_ROW };
+    book.set_cell_style(&[("font.b", "true"), ("fill.color", "#ff0000"), ("num_fmt", "0.0")], &area)
+        .expect("setup");
+    book.clear_style_cols(2, 2).expect("cols");
+    assert!(book.cell_has_style(&phase2_addr(1, 1), StyleFlag::Bold));
+    assert_default_style(&book, 1, 2);
+    assert_default_style(&book, 900, 3);
+
+    let mut book = Book::default();
+    let area = Area { sheet: 0, row: 1, column: 1, width: LAST_COLUMN, height: 3 };
+    book.set_cell_style(&[("font.i", "true")], &area).expect("setup");
+    book.clear_style_rows(2, 1).expect("rows");
+    assert!(book.cell_has_style(&phase2_addr(1, 4), StyleFlag::Italic));
+    assert_default_style(&book, 2, 200);
+    assert!(book.cell_has_style(&phase2_addr(3, 4), StyleFlag::Italic));
+
+    assert!(book.clear_style_cols(0, 1).is_err());
+    assert!(book.clear_style_cols(1, 0).is_err());
+    assert!(book.clear_style_cols(LAST_COLUMN as usize, 2).is_err());
+    assert!(book.clear_style_rows(0, 1).is_err());
+    assert!(book.clear_style_rows(LAST_ROW as usize, 2).is_err());
+}
+
+#[test]
+fn test_clear_style_is_one_undo_step() {
+    let mut book = styled_book();
+    let area = Area { sheet: 0, row: 1, column: 1, width: 2, height: 2 };
+    book.clear_style(&area).expect("clear");
+    book.undo().expect("undo");
+    assert!(book.cell_has_style(&phase2_addr(1, 1), StyleFlag::Bold));
+    assert_eq!(Some("0.00%".to_string()), book.get_number_format(&phase2_addr(2, 2)));
+}

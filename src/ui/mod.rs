@@ -1055,6 +1055,18 @@ impl<'ws> Workspace<'ws> {
                 self.style_span(false, count, words);
                 Ok(None)
             }
+            Ok(Some(Cmd::ClearStyle)) => {
+                self.clear_style_cells();
+                Ok(None)
+            }
+            Ok(Some(Cmd::ClearStyleCols(count))) => {
+                self.clear_style_span(true, count);
+                Ok(None)
+            }
+            Ok(Some(Cmd::ClearStyleRows(count))) => {
+                self.clear_style_span(false, count);
+                Ok(None)
+            }
             Ok(Some(Cmd::Decimals(change))) => {
                 self.change_decimals(change);
                 Ok(None)
@@ -1800,6 +1812,69 @@ impl<'ws> Workspace<'ws> {
         }
     }
 
+    /// The first column or row, how many, and the deciding cell of a
+    /// whole-column or whole-row style command. In range select (started
+    /// from navigation) that is every column or row the selection touches,
+    /// decided by its first cell, and `count` is ignored; else `count` from
+    /// the cursor.
+    fn span_targets(&self, cols: bool, count: Option<usize>) -> (usize, usize, Address) {
+        let loc = self.book.location.clone();
+        match self.fill_selection() {
+            Some((a, b)) => {
+                let decider = Address { sheet: loc.sheet, row: a.row.min(b.row), col: a.col.min(b.col) };
+                if cols {
+                    (decider.col, a.col.max(b.col) - decider.col + 1, decider)
+                } else {
+                    (decider.row, a.row.max(b.row) - decider.row + 1, decider)
+                }
+            }
+            None => (if cols { loc.col } else { loc.row }, count.unwrap_or(1), loc),
+        }
+    }
+
+    /// `:clear-style` on the cursor cell or selection.
+    fn clear_style_cells(&mut self) {
+        if self.in_cell_edit_range_select() {
+            return;
+        }
+        let area = self.target_area();
+        match self.book.clear_style(&area) {
+            Ok(()) => {
+                let cells = area.width * area.height;
+                let what = if cells == 1 { "1 cell".to_string() } else { format!("{cells} cells") };
+                self.set_message(MessageLevel::Info, format!("Cleared style: {what}"));
+            }
+            Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
+        }
+    }
+
+    /// `:clear-style-cols` and `:clear-style-rows`, with the targets of
+    /// [`Workspace::style_span`].
+    fn clear_style_span(&mut self, cols: bool, count: Option<usize>) {
+        if self.in_cell_edit_range_select() {
+            return;
+        }
+        let (first, count, _) = self.span_targets(cols, count);
+        let result = if cols {
+            self.book.clear_style_cols(first, count)
+        } else {
+            self.book.clear_style_rows(first, count)
+        };
+        match result {
+            Ok(()) => {
+                let what = span_name(cols, first, count);
+                self.set_message(MessageLevel::Info, format!("Cleared style: {what}"));
+            }
+            Err(_) => {
+                let usage = if cols { "Usage: clear-style-cols [count]" } else { "Usage: clear-style-rows [count]" };
+                self.set_message(
+                    MessageLevel::Error,
+                    format!("{usage}: the count must be at least 1 and stay within the sheet"),
+                );
+            }
+        }
+    }
+
     /// `:style-cols` and `:style-rows`. In range select the columns or rows
     /// the selection touches, ignoring `count`; else `count` from the cursor.
     /// Toggles are decided by the cursor cell (the first selected cell in
@@ -1817,22 +1892,7 @@ impl<'ws> Workspace<'ws> {
             Ok(attrs) => attrs,
             Err(e) => return self.set_message(MessageLevel::Error, e),
         };
-        let loc = self.book.location.clone();
-        let (first, count, decider) = match self.fill_selection() {
-            Some((a, b)) => {
-                let decider = Address { sheet: loc.sheet, row: a.row.min(b.row), col: a.col.min(b.col) };
-                if cols {
-                    (decider.col, a.col.max(b.col) - decider.col + 1, decider)
-                } else {
-                    (decider.row, a.row.max(b.row) - decider.row + 1, decider)
-                }
-            }
-            None => (
-                if cols { loc.col } else { loc.row },
-                count.unwrap_or(1),
-                loc,
-            ),
-        };
+        let (first, count, decider) = self.span_targets(cols, count);
         let result = if cols {
             self.book.apply_style_cols(first, count, &decider, &attrs)
         } else {
@@ -1840,15 +1900,7 @@ impl<'ws> Workspace<'ws> {
         };
         match result {
             Ok(done) => {
-                let name = |i: usize| {
-                    if cols { number_to_column(i as i32).unwrap_or_default() } else { i.to_string() }
-                };
-                let kind = if cols { "column" } else { "row" };
-                let what = if count == 1 {
-                    format!("{kind} {}", name(first))
-                } else {
-                    format!("{kind}s {}:{}", name(first), name(first + count - 1))
-                };
+                let what = span_name(cols, first, count);
                 self.set_message(MessageLevel::Info, format!("{}: {what}", style_summary(&attrs, &done)));
             }
             Err(_) => self.set_message(
@@ -2842,6 +2894,20 @@ fn autofit_message(
         format!("Fitted {total} columns")
     } else {
         format!("Fitted {total} columns ({empty} empty, reset to {default})")
+    }
+}
+
+/// The columns or rows a style command changed, for the message line:
+/// `column C`, `columns A:C`, `row 4` or `rows 1:2`.
+fn span_name(cols: bool, first: usize, count: usize) -> String {
+    let name = |i: usize| {
+        if cols { number_to_column(i as i32).unwrap_or_default() } else { i.to_string() }
+    };
+    let kind = if cols { "column" } else { "row" };
+    if count == 1 {
+        format!("{kind} {}", name(first))
+    } else {
+        format!("{kind}s {}:{}", name(first), name(first + count - 1))
     }
 }
 
