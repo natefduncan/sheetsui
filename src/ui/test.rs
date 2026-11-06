@@ -6406,3 +6406,89 @@ fn test_style_cols_range_select_ignores_count() {
     assert!(!has_style(&ws, 1, 4, StyleFlag::Bold));
     assert_eq!(Some("Bold: columns B:C".to_owned()), last_message(&ws));
 }
+
+fn cell_style_of(ws: &Workspace, row: usize, col: usize) -> ironcalc::base::types::Style {
+    ws.book
+        .get_cell_style(&Address { sheet: ws.book.location.sheet, row, col })
+        .expect("style")
+}
+
+fn halign_of(ws: &Workspace, row: usize, col: usize) -> Option<ironcalc::base::types::HorizontalAlignment> {
+    cell_style_of(ws, row, col).alignment.map(|a| a.horizontal)
+}
+
+#[test]
+fn test_align_and_font_color_cmd_parse() {
+    assert_eq!(Cmd::Align("center"), parse("align center").unwrap().unwrap());
+    assert_eq!(Cmd::Align("general"), parse("align general").unwrap().unwrap());
+    assert_eq!(Err("Usage: align <left|center|right|general>"), parse("align"));
+    assert_eq!(Err("Usage: align <left|center|right|general>"), parse("align middle"));
+    assert_eq!(Cmd::FontColor("red"), parse("font-color red").unwrap().unwrap());
+    assert_eq!(Err("Usage: font-color <color>"), parse("font-color"));
+}
+
+#[test]
+fn test_parse_style_attrs_align_and_color() {
+    use crate::book::HAlign;
+    assert_eq!(
+        Ok(vec![StyleAttr::Align(HAlign::Center), StyleAttr::Color(Some("#800000".to_string())), StyleAttr::Toggle(StyleFlag::Bold)]),
+        parse_style_attrs("center color=red bold"),
+    );
+    assert_eq!(Ok(vec![StyleAttr::Color(None)]), parse_style_attrs("nocolor"));
+    assert_eq!(Ok(vec![StyleAttr::Align(HAlign::General)]), parse_style_attrs("general"));
+    assert_eq!(Err("Repeated style: alignment".to_string()), parse_style_attrs("left right"));
+    assert_eq!(Err("Repeated style: color".to_string()), parse_style_attrs("color=red nocolor"));
+    assert_eq!(Err("Repeated style: color".to_string()), parse_style_attrs("color=red color=blue"));
+    assert!(parse_style_attrs("color=nonsense").is_err());
+}
+
+#[test]
+fn test_align_cmd_sets_clears_and_undoes() {
+    use ironcalc::base::types::HorizontalAlignment as H;
+    let mut ws = new_workspace();
+    run_command(&mut ws, "align center");
+    assert_eq!(Some(H::Center), halign_of(&ws, 1, 1));
+    assert_eq!(Some("Align center: 1 cell".to_owned()), last_message(&ws));
+    run_command(&mut ws, "align right");
+    assert_eq!(Some(H::Right), halign_of(&ws, 1, 1));
+    run_command(&mut ws, "align general");
+    assert_eq!(Some(H::General), halign_of(&ws, 1, 1));
+    run_command(&mut ws, "undo");
+    assert_eq!(Some(H::Right), halign_of(&ws, 1, 1));
+    run_command(&mut ws, "style left bold");
+    assert_eq!(Some(H::Left), halign_of(&ws, 1, 1));
+    assert!(has_style(&ws, 1, 1, StyleFlag::Bold));
+}
+
+#[test]
+fn test_align_cmd_range_select_and_cols() {
+    use ironcalc::base::types::HorizontalAlignment as H;
+    let mut ws = new_workspace();
+    script().char('v').chars("jl").char(':').chars("align right").enter().run(&mut ws).expect("script");
+    for (r, c) in [(1, 1), (1, 2), (2, 1), (2, 2)] {
+        assert_eq!(Some(H::Right), halign_of(&ws, r, c));
+    }
+    assert_eq!(Some("Align right: 4 cells".to_owned()), last_message(&ws));
+    assert_eq!(None, halign_of(&ws, 3, 3));
+    run_command(&mut ws, "style-cols 2 center");
+    assert_eq!(Some(H::Center), halign_of(&ws, 50, 2));
+}
+
+#[test]
+fn test_font_color_cmd_sets_and_rejects_bad_color() {
+    use ironcalc::base::types::Color;
+    let mut ws = new_workspace();
+    run_command(&mut ws, "font-color red");
+    assert_eq!(Color::Rgb("#800000".to_string()), cell_style_of(&ws, 1, 1).font.color);
+    assert_eq!(Some("Font color #800000: 1 cell".to_owned()), last_message(&ws));
+    run_command(&mut ws, "style nocolor");
+    assert_eq!(Color::None, cell_style_of(&ws, 1, 1).font.color);
+    run_command(&mut ws, "style color=#00ff00 bold");
+    assert_eq!(Color::Rgb("#00ff00".to_string()), cell_style_of(&ws, 1, 1).font.color);
+    run_command(&mut ws, "font-color notacolor");
+    assert_eq!(super::MessageLevel::Error, ws.state.message.as_ref().unwrap().level);
+    assert_eq!(Color::Rgb("#00ff00".to_string()), cell_style_of(&ws, 1, 1).font.color);
+    // A bad word after a good color changes nothing.
+    run_command(&mut ws, "style color=blue shiny");
+    assert_eq!(Color::Rgb("#00ff00".to_string()), cell_style_of(&ws, 1, 1).font.color);
+}

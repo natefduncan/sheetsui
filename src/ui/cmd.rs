@@ -2,7 +2,7 @@
 use ironcalc::base::expressions::utils::{column_to_number, is_valid_column};
 use slice_utils::{Measured, Peekable, Seekable, Span, StrCursor};
 
-use crate::book::{DecimalsChange, FillDirection, StyleAttr, StyleFlag, MAX_DECIMALS};
+use crate::book::{DecimalsChange, FillDirection, HAlign, StyleAttr, StyleFlag, MAX_DECIMALS};
 use crate::book::substitute::{is_delimiter, Scope};
 
 /// A parsed command entered in during command mode.
@@ -42,6 +42,10 @@ pub enum Cmd<'a> {
     /// when not written; the words are still to parse.
     StyleCols(Option<usize>, &'a str),
     StyleRows(Option<usize>, &'a str),
+    /// `:align left|center|right|general`: the alignment word.
+    Align(&'a str),
+    /// `:font-color <color>`: the color text, parsed by the UI.
+    FontColor(&'a str),
     /// `:decimals <+n|-n|n>`: add, remove or set decimal places.
     Decimals(DecimalsChange),
     RenameSheet(Option<usize>, &'a str),
@@ -191,6 +195,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_style_span(cursor.clone(), "style-rows")? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_style_alias(cursor.clone())? {
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_style(cursor.clone())? {
@@ -392,6 +399,25 @@ fn try_consume_style<'cmd, 'i: 'cmd>(
     Ok(Some(Cmd::Style(rest)))
 }
 
+/// `align <left|center|right|general>` and `font-color <color>`.
+fn try_consume_style_alias<'cmd, 'i: 'cmd>(
+    input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    if let Some(rest) = command_args(&input, "align") {
+        return match rest {
+            "left" | "center" | "right" | "general" => Ok(Some(Cmd::Align(rest))),
+            _ => Err("Usage: align <left|center|right|general>"),
+        };
+    }
+    if let Some(rest) = command_args(&input, "font-color") {
+        if rest.is_empty() {
+            return Err("Usage: font-color <color>");
+        }
+        return Ok(Some(Cmd::FontColor(rest)));
+    }
+    Ok(None)
+}
+
 /// `style-cols` and `style-rows`: `[count] <attr>...`. The count comes first
 /// and only when an attribute follows it.
 fn try_consume_style_span<'cmd, 'i: 'cmd>(
@@ -455,13 +481,27 @@ pub fn parse_style_attrs(text: &str) -> Result<Vec<StyleAttr>, String> {
             "noitalic" => StyleAttr::Set(StyleFlag::Italic, false),
             "nounderline" => StyleAttr::Set(StyleFlag::Underline, false),
             "nostrike" => StyleAttr::Set(StyleFlag::Strike, false),
-            _ => return Err(format!("Unknown style: {word}")),
+            "left" => StyleAttr::Align(HAlign::Left),
+            "center" => StyleAttr::Align(HAlign::Center),
+            "right" => StyleAttr::Align(HAlign::Right),
+            "general" => StyleAttr::Align(HAlign::General),
+            "nocolor" => StyleAttr::Color(None),
+            _ => match word.strip_prefix("color=") {
+                Some(c) => StyleAttr::Color(Some(parse_color(c).map_err(|e| e.to_string())?)),
+                None => return Err(format!("Unknown style: {word}")),
+            },
         };
-        let flag = match attr {
-            StyleAttr::Toggle(f) | StyleAttr::Set(f, _) => f,
-        };
-        if attrs.iter().any(|a| matches!(a, StyleAttr::Toggle(f) | StyleAttr::Set(f, _) if *f == flag)) {
-            return Err(format!("Repeated style: {}", flag.word()));
+        let repeated = attrs.iter().any(|a| match (a, &attr) {
+            (StyleAttr::Toggle(f) | StyleAttr::Set(f, _), StyleAttr::Toggle(g) | StyleAttr::Set(g, _)) => f == g,
+            (StyleAttr::Align(_), StyleAttr::Align(_)) | (StyleAttr::Color(_), StyleAttr::Color(_)) => true,
+            _ => false,
+        });
+        if repeated {
+            return Err(match &attr {
+                StyleAttr::Toggle(f) | StyleAttr::Set(f, _) => format!("Repeated style: {}", f.word()),
+                StyleAttr::Align(_) => "Repeated style: alignment".to_string(),
+                StyleAttr::Color(_) => "Repeated style: color".to_string(),
+            });
         }
         attrs.push(attr);
     }

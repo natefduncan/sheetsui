@@ -1036,6 +1036,17 @@ impl<'ws> Workspace<'ws> {
                 self.style_cells(words);
                 Ok(None)
             }
+            Ok(Some(Cmd::Align(word))) => {
+                self.style_cells(word);
+                Ok(None)
+            }
+            Ok(Some(Cmd::FontColor(color))) => {
+                match cmd::parse_color(color) {
+                    Ok(hex) => self.style_cells_with(Ok(vec![book::StyleAttr::Color(Some(hex))])),
+                    Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
+                }
+                Ok(None)
+            }
             Ok(Some(Cmd::StyleCols(count, words))) => {
                 self.style_span(true, count, words);
                 Ok(None)
@@ -1767,10 +1778,14 @@ impl<'ws> Workspace<'ws> {
 
     /// `:style <attr>...` and its aliases, on the cursor cell or selection.
     fn style_cells(&mut self, words: &str) {
+        self.style_cells_with(cmd::parse_style_attrs(words));
+    }
+
+    fn style_cells_with(&mut self, attrs: Result<Vec<book::StyleAttr>, String>) {
         if self.in_cell_edit_range_select() {
             return;
         }
-        let attrs = match cmd::parse_style_attrs(words) {
+        let attrs = match attrs {
             Ok(attrs) => attrs,
             Err(e) => return self.set_message(MessageLevel::Error, e),
         };
@@ -1779,7 +1794,7 @@ impl<'ws> Workspace<'ws> {
             Ok(done) => {
                 let cells = area.width * area.height;
                 let what = if cells == 1 { "1 cell".to_string() } else { format!("{cells} cells") };
-                self.set_message(MessageLevel::Info, format!("{}: {what}", style_summary(&done)));
+                self.set_message(MessageLevel::Info, format!("{}: {what}", style_summary(&attrs, &done)));
             }
             Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
         }
@@ -1834,7 +1849,7 @@ impl<'ws> Workspace<'ws> {
                 } else {
                     format!("{kind}s {}:{}", name(first), name(first + count - 1))
                 };
-                self.set_message(MessageLevel::Info, format!("{}: {what}", style_summary(&done)));
+                self.set_message(MessageLevel::Info, format!("{}: {what}", style_summary(&attrs, &done)));
             }
             Err(_) => self.set_message(
                 MessageLevel::Error,
@@ -2830,20 +2845,39 @@ fn autofit_message(
     }
 }
 
-/// What a style command did, for the message line: `Bold`, `Not bold`, or
-/// `Style bold nounderline` for several attributes.
-fn style_summary(done: &[(book::StyleFlag, bool)]) -> String {
+/// What a style command did, for the message line: `Bold`, `Not bold`,
+/// `Align center`, `Font color #ff0000`, or `Style bold center ...` for
+/// several attributes.
+fn style_summary(attrs: &[book::StyleAttr], done: &[(book::StyleFlag, bool)]) -> String {
+    use book::StyleAttr;
+    match attrs {
+        [StyleAttr::Align(a)] => return format!("Align {}", a.word()),
+        [StyleAttr::Color(Some(c))] => return format!("Font color {c}"),
+        [StyleAttr::Color(None)] => return "No font color".to_string(),
+        _ => {}
+    }
     match done {
-        [(flag, true)] => {
+        [(flag, true)] if attrs.len() == 1 => {
             let w = flag.word();
             format!("{}{}", w[..1].to_uppercase(), &w[1..])
         }
-        [(flag, false)] => format!("Not {}", flag.word()),
+        [(flag, false)] if attrs.len() == 1 => format!("Not {}", flag.word()),
         _ => {
-            let words: Vec<String> = done
-                .iter()
-                .map(|(flag, on)| if *on { flag.word().to_string() } else { format!("no{}", flag.word()) })
-                .collect();
+            let mut words: Vec<String> = Vec::new();
+            let mut flags = done.iter();
+            for attr in attrs {
+                words.push(match attr {
+                    StyleAttr::Toggle(_) | StyleAttr::Set(..) => match flags.next() {
+                        Some((flag, on)) => {
+                            if *on { flag.word().to_string() } else { format!("no{}", flag.word()) }
+                        }
+                        None => continue,
+                    },
+                    StyleAttr::Align(a) => a.word().to_string(),
+                    StyleAttr::Color(Some(c)) => format!("color={c}"),
+                    StyleAttr::Color(None) => "nocolor".to_string(),
+                });
+            }
             format!("Style {}", words.join(" "))
         }
     }

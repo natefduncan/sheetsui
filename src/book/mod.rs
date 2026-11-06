@@ -101,14 +101,41 @@ impl StyleFlag {
     }
 }
 
-/// One attribute of a `:style` command.
+/// A horizontal alignment `:style` and `:align` can set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HAlign {
+    /// Clears the horizontal alignment: text left, numbers right.
+    General,
+    Left,
+    Center,
+    Right,
+}
+
+impl HAlign {
+    /// The ironcalc `alignment.horizontal` value, also the word used in
+    /// `:style` and in messages.
+    pub fn word(self) -> &'static str {
+        match self {
+            HAlign::General => "general",
+            HAlign::Left => "left",
+            HAlign::Center => "center",
+            HAlign::Right => "right",
+        }
+    }
+}
+
+/// One attribute of a `:style` command.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StyleAttr {
     /// Decided once from the first cell of the area: if it has the
     /// attribute the area loses it, else the area gets it.
     Toggle(StyleFlag),
     /// Switch the attribute on or off whatever the cells have now.
     Set(StyleFlag, bool),
+    /// Set the horizontal alignment.
+    Align(HAlign),
+    /// Set the font color to a hex string (`#rrggbb`), or `None` to clear it.
+    Color(Option<String>),
 }
 
 /// The most decimal places `:decimals` will make.
@@ -1065,17 +1092,19 @@ impl Book {
         decider: &Address,
         attrs: &[StyleAttr],
     ) -> Result<Vec<(StyleFlag, bool)>> {
-        let done: Vec<(StyleFlag, bool)> = attrs
-            .iter()
-            .map(|attr| match *attr {
-                StyleAttr::Toggle(flag) => (flag, !self.cell_has_style(decider, flag)),
-                StyleAttr::Set(flag, on) => (flag, on),
-            })
-            .collect();
-        let style: Vec<(&str, &str)> = done
-            .iter()
-            .map(|(flag, on)| (flag.path(), if *on { "true" } else { "false" }))
-            .collect();
+        let mut done: Vec<(StyleFlag, bool)> = Vec::new();
+        let mut style: Vec<(&str, &str)> = Vec::new();
+        for attr in attrs {
+            match attr {
+                StyleAttr::Toggle(flag) => done.push((*flag, !self.cell_has_style(decider, *flag))),
+                StyleAttr::Set(flag, on) => done.push((*flag, *on)),
+                StyleAttr::Align(a) => style.push(("alignment.horizontal", a.word())),
+                StyleAttr::Color(c) => style.push(("font.color", c.as_deref().unwrap_or(""))),
+            }
+        }
+        for (flag, on) in &done {
+            style.push((flag.path(), if *on { "true" } else { "false" }));
+        }
         self.set_cell_style(&style, area)?;
         Ok(done)
     }
