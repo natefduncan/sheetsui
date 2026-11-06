@@ -26,6 +26,41 @@ use ironcalc::{
     import::load_from_xlsx,
 };
 
+/// The number format presets: name and Excel format code.
+pub const NUMBER_FORMAT_PRESETS: [(&str, &str); 9] = [
+    ("general", "General"),
+    ("number", "0.00"),
+    ("integer", "0"),
+    ("thousands", "#,##0"),
+    ("currency", "$#,##0.00"),
+    ("percent", "0.00%"),
+    ("date", "yyyy-mm-dd"),
+    ("time", "hh:mm:ss"),
+    ("scientific", "0.00E+00"),
+];
+
+/// The format code for a preset name (not case sensitive).
+pub fn number_format_preset(name: &str) -> Option<&'static str> {
+    NUMBER_FORMAT_PRESETS
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|(_, code)| *code)
+}
+
+/// Check a format code by formatting a sample number with it. ironcalc stores
+/// whatever code it is given, and a bad one makes the cell render as an error.
+pub fn check_number_format(code: &str) -> Result<()> {
+    if code.trim().is_empty() {
+        return Err(anyhow!("Invalid number format: {code}"));
+    }
+    let locale = ironcalc::base::locale::get_default_locale();
+    let formatted = ironcalc::base::formatter::format::format_number(1234.5, code, locale);
+    if formatted.error.is_some() {
+        return Err(anyhow!("Invalid number format: {code}"));
+    }
+    Ok(())
+}
+
 /// The file format a [`Book`] was loaded from or will be saved to.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FileFormat {
@@ -885,6 +920,26 @@ impl Book {
             }
             book.dirty = true;
             Ok(())
+        })
+    }
+
+    /// Set the number format of every cell in `area`, empty and text cells
+    /// included, as one undo step. The code is checked first with
+    /// [`check_number_format`], so a bad code changes nothing.
+    pub fn set_number_format(&mut self, code: &str, area: &Area) -> Result<()> {
+        check_number_format(code)?;
+        self.set_cell_style(&[("num_fmt", code)], area)
+    }
+
+    /// The number format code of a cell. ironcalc calls the default
+    /// `general`; it is always reported as `General`.
+    pub fn get_number_format(&self, cell: &Address) -> Option<String> {
+        self.get_cell_style(cell).map(|s| {
+            if s.num_fmt.eq_ignore_ascii_case("general") {
+                "General".to_string()
+            } else {
+                s.num_fmt
+            }
         })
     }
 

@@ -27,6 +27,9 @@ pub enum Cmd<'a> {
     ColorRows(Option<usize>, String),
     ColorColumns(Option<usize>, String),
     ColorCell(String),
+    /// `:format [<preset|code>]`: set the number format of the cursor cell or
+    /// selection, or with no argument show the cursor cell's format.
+    Format(Option<&'a str>),
     RenameSheet(Option<usize>, &'a str),
     NewSheet(Option<&'a str>),
     SelectSheet(&'a str),
@@ -162,6 +165,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_color_cell(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_format(cursor.clone())? {
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_system_paste(cursor.clone())? {
@@ -307,6 +313,24 @@ fn try_consume_color_cell<'cmd, 'i: 'cmd>(
     }
     let arg = parse_color(input.span(0..).trim())?;
     Ok(Some(Cmd::ColorCell(arg)))
+}
+
+fn try_consume_format<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "format";
+    const USAGE: &str = "Usage: format [<preset|code>]";
+    if !compare(input.clone(), LONG) {
+        return Ok(None);
+    }
+    input.seek(LONG.len());
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err(USAGE);
+    }
+    // The format is everything after the command, so a raw code may hold
+    // spaces and quotes.
+    let arg = input.span(0..).trim();
+    Ok(Some(Cmd::Format(if arg.is_empty() { None } else { Some(arg) })))
 }
 
 fn try_consume_insert_row<'cmd, 'i: 'cmd>(

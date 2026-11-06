@@ -171,7 +171,10 @@ checked by running anything:
   have a style (N13). The test pins the answer.
 - What typing `5%` into a cell formatted as currency does to its format (N9).
 - That the formatter's error path is reachable from outside the library and
-  reports a bad code (N3). If it is not, the check has to parse the code
+  reports a bad code (N3). Checked: it is, through
+  `ironcalc::base::formatter::format::format_number`, whose `error` field is set
+  for a bad code. ironcalc reports the default format as lowercase `general`;
+  `Book::get_number_format` reports it as `General`. If it is not, the check has to parse the code
   itself, and the design should be updated.
 - That Alt with a digit, `.` and `,` is reported by common terminals (N6).
 

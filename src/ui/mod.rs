@@ -5,7 +5,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::book::{self, search::Direction, substitute, AddressRange, Book, FillDirection, SortKey};
+use crate::book::{self, number_format_preset, search::Direction, substitute, AddressRange, Book, FillDirection, SortKey};
 
 use anyhow::{anyhow, Result};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -1028,6 +1028,10 @@ impl<'ws> Workspace<'ws> {
                     .set_cell_style(&[("fill.color", &color)], &area)?;
                 Ok(None)
             }
+            Ok(Some(Cmd::Format(arg))) => {
+                self.format_cells(arg);
+                Ok(None)
+            }
             Ok(Some(Cmd::SystemPaste)) => {
                 let rows = self.get_rows_from_system_clipboard()?;
                 self.state.clipboard = Some(ClipboardContents::Range(rows));
@@ -1668,6 +1672,54 @@ impl<'ws> Workspace<'ws> {
                 (lo, hi - lo + 1, Some(rows))
             }
             None => (self.book.location.col, count, None),
+        }
+    }
+
+    /// The cells a cell command applies to: the selection in range select,
+    /// else the cursor cell.
+    fn target_area(&self) -> Area {
+        let sheet = self.book.location.sheet;
+        if let Some((start, end)) = self.state.range_select.get_range() {
+            Area {
+                sheet,
+                row: start.row as i32,
+                column: start.col as i32,
+                width: (end.col - start.col + 1) as i32,
+                height: (end.row - start.row + 1) as i32,
+            }
+        } else {
+            Area {
+                sheet,
+                row: self.book.location.row as i32,
+                column: self.book.location.col as i32,
+                width: 1,
+                height: 1,
+            }
+        }
+    }
+
+    /// `:format [<preset|code>]`.
+    fn format_cells(&mut self, arg: Option<&str>) {
+        let Some(arg) = arg else {
+            let code = self.book.get_number_format(&self.book.location);
+            let code = code.unwrap_or_else(|| "General".to_string());
+            self.set_message(MessageLevel::Info, format!("Format: {code}"));
+            return;
+        };
+        if self.in_cell_edit_range_select() {
+            return;
+        }
+        let preset = number_format_preset(arg);
+        let code = preset.unwrap_or(arg);
+        let area = self.target_area();
+        match self.book.set_number_format(code, &area) {
+            Ok(()) => {
+                let cells = area.width * area.height;
+                let what = if cells == 1 { "1 cell".to_string() } else { format!("{cells} cells") };
+                let name = if preset.is_some() { arg.to_lowercase() } else { arg.to_string() };
+                self.set_message(MessageLevel::Info, format!("Format {name}: {what}"));
+            }
+            Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
         }
     }
 

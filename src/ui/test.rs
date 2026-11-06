@@ -5914,3 +5914,91 @@ fn test_ctrl_l_stops_at_255_and_ctrl_h_at_1() {
     run(&mut ws, script().ctrl('h'));
     assert_eq!(1, ws.book.get_col_size(1).unwrap());
 }
+
+fn fmt_of(ws: &Workspace, row: usize, col: usize) -> String {
+    ws.book
+        .get_number_format(&Address { sheet: ws.book.location.sheet, row, col })
+        .expect("format")
+}
+
+#[test]
+fn test_format_cmd_parse() {
+    assert_eq!(Cmd::Format(None), parse("format").unwrap().unwrap());
+    assert_eq!(Cmd::Format(None), parse("format  ").unwrap().unwrap());
+    assert_eq!(Cmd::Format(Some("percent")), parse("format percent").unwrap().unwrap());
+    assert_eq!(
+        Cmd::Format(Some("0.00 \"USD\"")),
+        parse("format 0.00 \"USD\"").unwrap().unwrap()
+    );
+    assert_eq!(Err("Usage: format [<preset|code>]"), parse("formatx"));
+}
+
+#[test]
+fn test_format_cmd_cursor_cell_preset_and_message() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "format Currency");
+    assert_eq!("$#,##0.00", fmt_of(&ws, 1, 1));
+    assert_eq!("General", fmt_of(&ws, 1, 2));
+    assert_eq!(Some("Format currency: 1 cell".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_format_cmd_raw_code_with_spaces_and_quotes() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "format 0.00 \"USD\"");
+    assert_eq!("0.00 \"USD\"", fmt_of(&ws, 1, 1));
+    assert_eq!(Some("Format 0.00 \"USD\": 1 cell".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_format_cmd_bad_code_is_error_and_changes_nothing() {
+    let mut ws = new_workspace();
+    script().char('v').chars("jjll").char(':').chars("format \"abc").enter()
+        .run(&mut ws).expect("script");
+    assert_eq!(Some("Invalid number format: \"abc".to_owned()), last_message(&ws));
+    assert_eq!(super::MessageLevel::Error, ws.state.message.as_ref().unwrap().level);
+    for r in 1..=3 {
+        for c in 1..=3 {
+            assert_eq!("General", fmt_of(&ws, r, c));
+        }
+    }
+}
+
+#[test]
+fn test_format_cmd_range_select_exact_cells_one_undo() {
+    let mut ws = new_workspace();
+    script().char('v').chars("jjll").char(':').chars("format percent").enter()
+        .run(&mut ws).expect("script");
+    for r in 1..=4 {
+        for c in 1..=4 {
+            let want = if r <= 3 && c <= 3 { "0.00%" } else { "General" };
+            assert_eq!(want, fmt_of(&ws, r, c), "{r}:{c}");
+        }
+    }
+    assert_eq!(Some("Format percent: 9 cells".to_owned()), last_message(&ws));
+    run_command(&mut ws, "undo");
+    for r in 1..=3 {
+        for c in 1..=3 {
+            assert_eq!("General", fmt_of(&ws, r, c), "{r}:{c}");
+        }
+    }
+}
+
+#[test]
+fn test_format_cmd_no_argument_shows_format_and_changes_nothing() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "format");
+    assert_eq!(Some("Format: General".to_owned()), last_message(&ws));
+    run_command(&mut ws, "format percent");
+    run_command(&mut ws, "format");
+    assert_eq!(Some("Format: 0.00%".to_owned()), last_message(&ws));
+    assert_eq!("0.00%", fmt_of(&ws, 1, 1));
+}
+
+#[test]
+fn test_format_cmd_never_changes_col_width() {
+    let mut ws = new_workspace();
+    let before = ws.book.get_col_size(1).unwrap();
+    run_command(&mut ws, "format currency");
+    assert_eq!(before, ws.book.get_col_size(1).unwrap());
+}

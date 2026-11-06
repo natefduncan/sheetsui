@@ -5,7 +5,7 @@ use crate::ui::Address;
 use super::{
     shrink_freeze,
     search::{Direction, SearchIn},
-    AutofitReport, Book, FileFormat, DEFAULT_COL_WIDTH, LAST_COLUMN, LAST_ROW,
+    check_number_format, number_format_preset, AutofitReport, Book, FileFormat, DEFAULT_COL_WIDTH, LAST_COLUMN, LAST_ROW,
 };
 use ironcalc::base::UserModel;
 
@@ -2424,4 +2424,112 @@ fn test_xlsx_writes_no_width_for_columns_following_the_default() {
     read.set_default_width(10);
     assert_eq!(10, read.get_col_size(1).unwrap());
     assert_eq!(30, read.get_col_size(2).unwrap());
+}
+
+fn fmt_area(row: i32, column: i32, width: i32, height: i32) -> Area {
+    Area { sheet: 0, row, column, width, height }
+}
+
+#[test]
+fn test_number_format_presets() {
+    let expect = [
+        ("general", "General"),
+        ("number", "0.00"),
+        ("integer", "0"),
+        ("thousands", "#,##0"),
+        ("currency", "$#,##0.00"),
+        ("percent", "0.00%"),
+        ("date", "yyyy-mm-dd"),
+        ("time", "hh:mm:ss"),
+        ("scientific", "0.00E+00"),
+    ];
+    for (name, code) in expect {
+        assert_eq!(number_format_preset(name), Some(code));
+        assert_eq!(number_format_preset(&name.to_uppercase()), Some(code));
+        let mut book = Book::default();
+        book.set_number_format(code, &fmt_area(1, 1, 1, 1)).expect("format");
+        assert_eq!(book.get_number_format(&phase2_addr(1, 1)).as_deref(), Some(code));
+    }
+    assert_eq!(number_format_preset("0.00"), None);
+}
+
+#[test]
+fn test_check_number_format() {
+    for ok in ["0.00", "0.00 \"USD\"", "#,##0;[Red]-#,##0", "yyyy-mm-dd", "General"] {
+        assert!(check_number_format(ok).is_ok(), "{ok} should be accepted");
+    }
+    for bad in ["", "0.00;0.00;0.00;@;0", "\"abc", "yyyy-mm-dd\"x"] {
+        let err = check_number_format(bad).expect_err(bad).to_string();
+        assert_eq!(err, format!("Invalid number format: {bad}"));
+    }
+}
+
+#[test]
+fn test_set_number_format_bad_code_changes_nothing() {
+    let mut book = Book::default();
+    book.update_cell(&phase2_addr(1, 1), "5").expect("edit");
+    let before = book.get_number_format(&phase2_addr(1, 1));
+    assert!(book.set_number_format("\"abc", &fmt_area(1, 1, 2, 2)).is_err());
+    assert_eq!(book.get_number_format(&phase2_addr(1, 1)), before);
+    assert_eq!(book.get_number_format(&phase2_addr(2, 2)), before);
+}
+
+#[test]
+fn test_set_number_format_empty_text_and_number_cells() {
+    let mut book = Book::default();
+    book.update_cell(&phase2_addr(1, 1), "text").expect("edit");
+    book.update_cell(&phase2_addr(1, 2), "0.5").expect("edit");
+    book.set_number_format("0.00%", &fmt_area(1, 1, 3, 1)).expect("format");
+    book.evaluate();
+    assert_eq!(book.get_cell_addr_rendered(&phase2_addr(1, 1)).unwrap(), "text");
+    assert_eq!(book.get_cell_addr_rendered(&phase2_addr(1, 2)).unwrap(), "50.00%");
+    for col in 1..=3 {
+        assert_eq!(book.get_number_format(&phase2_addr(1, col)).as_deref(), Some("0.00%"));
+    }
+    // A number typed later into the empty, formatted cell shows with it.
+    book.update_cell(&phase2_addr(1, 3), "0.25").expect("edit");
+    book.evaluate();
+    assert_eq!(book.get_cell_addr_rendered(&phase2_addr(1, 3)).unwrap(), "25.00%");
+}
+
+#[test]
+fn test_set_number_format_is_one_undo_step() {
+    let mut book = Book::default();
+    book.set_number_format("0.000", &fmt_area(1, 1, 3, 3)).expect("format");
+    assert_eq!(book.get_number_format(&phase2_addr(3, 3)).as_deref(), Some("0.000"));
+    assert!(book.undo().expect("undo"));
+    for (r, c) in [(1, 1), (2, 2), (3, 3)] {
+        assert_eq!(book.get_number_format(&phase2_addr(r, c)).as_deref(), Some("General"));
+    }
+    assert!(book.redo().expect("redo"));
+    assert_eq!(book.get_number_format(&phase2_addr(1, 1)).as_deref(), Some("0.000"));
+}
+
+#[test]
+fn test_number_format_does_not_change_col_width() {
+    let mut book = Book::default();
+    let before = book.model.get_column_width(0, 1).expect("width");
+    book.set_number_format("$#,##0.00", &fmt_area(1, 1, 1, 5)).expect("format");
+    assert_eq!(book.model.get_column_width(0, 1).expect("width"), before);
+}
+
+#[test]
+fn test_number_format_preset_roundtrip_sui_and_xlsx() {
+    let sui = tmp_path("fmt_roundtrip.sui");
+    let xlsx = tmp_path("fmt_roundtrip.xlsx");
+    let mut book = Book::default();
+    for (i, (_, code)) in super::NUMBER_FORMAT_PRESETS.iter().enumerate() {
+        let row = i as i32 + 1;
+        book.update_cell(&phase2_addr(row as usize, 1), "1234.5").expect("edit");
+        book.set_number_format(code, &fmt_area(row, 1, 1, 1)).expect("format");
+    }
+    book.save_as(&sui).expect("save sui");
+    book.save_as(&xlsx).expect("save xlsx");
+    for path in [&sui, &xlsx] {
+        let loaded = Book::load(path, "en", "America/New_York").expect("load");
+        for (i, (name, code)) in super::NUMBER_FORMAT_PRESETS.iter().enumerate() {
+            let got = loaded.get_number_format(&phase2_addr(i + 1, 1));
+            assert_eq!(got.as_deref(), Some(*code), "{name} via {path:?}");
+        }
+    }
 }
