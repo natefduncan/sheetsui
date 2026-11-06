@@ -25,6 +25,8 @@ pub enum Cmd<'a> {
     Edit(&'a str),
     Help(Option<&'a str>),
     Theme(Option<&'a str>),
+    /// `:config`: list every startup warning.
+    Config,
     /// `:set` and its settings, still to parse. See `options.rs`.
     Set(&'a str),
     /// `:noh`: hide the search highlight until the next search.
@@ -118,6 +120,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
     }
     // try consume help command.
     if let Some(cmd) = try_consume_help(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_config(cursor.clone())? {
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_theme(cursor.clone())? {
@@ -517,6 +522,24 @@ fn try_consume_help<'cmd, 'i: 'cmd>(
     } else {
         Some(arg)
     })))
+}
+
+fn try_consume_config<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "config";
+
+    if !compare(input.clone(), LONG) {
+        return Ok(None);
+    }
+    input.seek(LONG.len());
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err("Invalid command: Did you mean to type `config`?");
+    }
+    if !input.span(0..).trim().is_empty() {
+        return Err("config takes no arguments");
+    }
+    Ok(Some(Cmd::Config))
 }
 
 fn try_consume_theme<'cmd, 'i: 'cmd>(

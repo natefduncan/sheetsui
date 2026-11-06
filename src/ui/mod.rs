@@ -172,6 +172,8 @@ pub struct AppState<'ws> {
     pub theme: Theme,
     /// Warnings from the last theme load.
     pub theme_warnings: Vec<Warning>,
+    /// Warnings from the theme chosen at startup, kept for `:config`.
+    pub startup_theme_warnings: Vec<Warning>,
     /// The user themes directory. `None` means there are only built-ins.
     pub themes_dir: Option<PathBuf>,
     /// The name from the last `theme` line in the config file.
@@ -201,6 +203,7 @@ impl<'ws> Default for AppState<'ws> {
             dialog_scroll: 0,
             theme: Theme::default(),
             theme_warnings: Vec::new(),
+            startup_theme_warnings: Vec::new(),
             themes_dir: None,
             config_theme: None,
             message: None,
@@ -844,6 +847,10 @@ impl<'ws> Workspace<'ws> {
                     Some(name) => self.switch_theme(name),
                     None => self.enter_dialog_mode(self.theme_listing()),
                 }
+                Ok(None)
+            }
+            Ok(Some(Cmd::Config)) => {
+                self.enter_dialog_mode(self.config_listing());
                 Ok(None)
             }
             Ok(Some(Cmd::Set(args))) => {
@@ -2198,11 +2205,13 @@ impl<'ws> Workspace<'ws> {
         let (theme, warnings) = lookup::resolve(flag, config.as_deref(), themes_dir.as_deref());
         self.state.themes_dir = themes_dir;
         let name = flag.or(config.as_deref()).unwrap_or(&theme.name).to_owned();
+        self.state.startup_theme_warnings = warnings.clone();
         if warnings.is_empty() && flag.is_none() && config.is_none() {
             self.set_theme(theme);
         } else {
             self.apply_theme(&name, theme, warnings);
         }
+        self.report_startup_warnings();
     }
 
     /// Loads the keys file from `--keys`, else the config directory. Never
@@ -2216,7 +2225,7 @@ impl<'ws> Workspace<'ws> {
         let loaded = keys::file::load_file(flag, config_dir.as_deref(), &mut self.state.keymap);
         self.state.keymap.loaded_from = loaded.path;
         self.state.keymap.warnings.extend(loaded.warnings);
-        self.report_key_warnings();
+        self.report_startup_warnings();
     }
 
     /// Loads the `--config` file, else `config` from the config directory: `set` lines into the
@@ -2240,19 +2249,39 @@ impl<'ws> Workspace<'ws> {
         );
         self.state.keymap.warnings = loaded.warnings;
         self.state.config_theme = loaded.theme;
-        self.report_key_warnings();
+        self.report_startup_warnings();
     }
 
-    /// Counts the startup warnings so far on the message line.
-    fn report_key_warnings(&mut self) {
-        let count = self.state.keymap.warnings.len();
+    /// Counts the startup warnings so far (config, keys and theme) on the
+    /// message line. Says nothing when there are none.
+    fn report_startup_warnings(&mut self) {
+        let count = self.state.keymap.warnings.len() + self.state.startup_theme_warnings.len();
         if count > 0 {
             let plural = if count == 1 { "" } else { "s" };
             self.set_message(
                 MessageLevel::Error,
-                format!("keys: {count} warning{plural} (:nmap to list)"),
+                format!("{count} warning{plural}: see :config"),
             );
         }
+    }
+
+    /// The `:config` dialog: every startup warning, whatever file it came from.
+    fn config_listing(&self) -> Markdown {
+        let mut text = String::from("# Startup warnings\n\n");
+        let all: Vec<&Warning> = self
+            .state
+            .keymap
+            .warnings
+            .iter()
+            .chain(&self.state.startup_theme_warnings)
+            .collect();
+        if all.is_empty() {
+            text.push_str("No warnings.\n");
+        }
+        for w in all {
+            text.push_str(&format!("* {w}\n"));
+        }
+        Markdown::from_str_themed(&text, &self.state.theme)
     }
 
     /// The `:theme` dialog: available themes, then the last load's warnings.

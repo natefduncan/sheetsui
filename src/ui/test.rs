@@ -1056,7 +1056,7 @@ fn test_init_keys_counts_warnings_on_the_message_line() {
     let mut ws = new_workspace();
     ws.init_keys_from(None, Some(dir));
     assert_eq!(
-        Some("keys: 2 warnings (:nmap to list)".to_owned()),
+        Some("2 warnings: see :config".to_owned()),
         message_text(&ws)
     );
     assert_eq!(1, ws.state.keymap.nav.mappings().len(), "the good line loaded");
@@ -1070,7 +1070,7 @@ fn test_init_keys_one_warning_is_singular() {
     let mut ws = new_workspace();
     ws.init_keys_from(None, Some(dir));
     assert_eq!(
-        Some("keys: 1 warning (:nmap to list)".to_owned()),
+        Some("1 warning: see :config".to_owned()),
         message_text(&ws)
     );
 }
@@ -1081,7 +1081,7 @@ fn test_a_missing_keys_flag_file_is_a_warning_not_a_crash() {
     let mut ws = new_workspace();
     ws.init_keys_from(Some(&dir.join("nope")), Some(dir.clone()));
     assert_eq!(
-        Some("keys: 1 warning (:nmap to list)".to_owned()),
+        Some("1 warning: see :config".to_owned()),
         message_text(&ws)
     );
 }
@@ -1134,12 +1134,12 @@ fn test_config_warnings_are_counted_and_listed_by_nmap() {
     ws.init_config_from(None, Some(dir.clone()));
     assert!(ws.state.options.ignorecase(), "later lines still run");
     assert_eq!(
-        Some("keys: 2 warnings (:nmap to list)".to_owned()),
+        Some("2 warnings: see :config".to_owned()),
         message_text(&ws)
     );
     ws.init_keys_from(None, Some(dir));
     assert_eq!(
-        Some("keys: 3 warnings (:nmap to list)".to_owned()),
+        Some("3 warnings: see :config".to_owned()),
         message_text(&ws)
     );
     run_command(&mut ws, "nmap");
@@ -3274,7 +3274,7 @@ fn test_init_theme_flag_beats_config_and_bad_name_falls_back() {
     ws.init_theme_from(Some("nonesuch"), Some(dir.clone()));
     assert_eq!("default", ws.state.theme.name);
     assert_eq!(
-        Some("theme nonesuch: 1 warning (:theme to list)".to_owned()),
+        Some("1 warning: see :config".to_owned()),
         message_text(&ws)
     );
     let mut ws = new_workspace();
@@ -5524,7 +5524,70 @@ fn test_missing_config_flag_file_is_counted_as_a_warning() {
     let mut ws = new_workspace();
     ws.init_config_from(Some(&dir.join("nope")), Some(dir));
     assert_eq!(
-        Some("keys: 1 warning (:nmap to list)".to_owned()),
+        Some("1 warning: see :config".to_owned()),
         message_text(&ws)
     );
+}
+
+#[test]
+fn test_parse_config_cmd() {
+    assert_eq!(parse("config"), Ok(Some(Cmd::Config)));
+    assert!(parse("config x").is_err());
+    assert!(parse("configs").is_err());
+}
+
+#[test]
+fn test_config_cmd_lists_warnings_from_all_three_sources() {
+    let dir = temp_config_dir("config-cmd");
+    std::fs::write(dir.join("config"), "write x\nset ic\n").unwrap();
+    std::fs::write(dir.join("keys"), "nnoremap <Nope> j\n").unwrap();
+    std::fs::write(dir.join("themes/bad.theme"), "style nope fg red\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_config_from(None, Some(dir.clone()));
+    ws.init_theme_from(Some("bad"), Some(dir.clone()));
+    ws.init_keys_from(None, Some(dir));
+    assert_eq!(Some("3 warnings: see :config".to_owned()), message_text(&ws));
+    run_command(&mut ws, "config");
+    assert_eq!(&Modality::Dialog, ws.state.modality());
+    let text = popup_text(&ws);
+    assert!(text.contains("config:1:"), "{text}");
+    assert!(text.contains("keys:1:"), "{text}");
+    assert!(text.contains("bad:1:"), "{text}");
+}
+
+#[test]
+fn test_config_cmd_says_so_when_there_are_no_warnings() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "config");
+    assert_eq!(&Modality::Dialog, ws.state.modality());
+    assert!(popup_text(&ws).contains("No warnings"));
+}
+
+#[test]
+fn test_config_cmd_keeps_startup_theme_warnings_after_a_theme_switch() {
+    let dir = temp_config_dir("config-cmd-switch");
+    std::fs::write(dir.join("themes/bad.theme"), "style nope fg red\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_theme_from(Some("bad"), Some(dir));
+    run_command(&mut ws, "theme light");
+    run_command(&mut ws, "config");
+    assert!(popup_text(&ws).contains("bad:1:"));
+}
+
+#[test]
+fn test_nmap_and_theme_dialogs_stay_filtered() {
+    let dir = temp_config_dir("config-cmd-filter");
+    std::fs::write(dir.join("keys"), "nnoremap <Nope> j\n").unwrap();
+    std::fs::write(dir.join("themes/bad.theme"), "style nope fg red\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_theme_from(Some("bad"), Some(dir.clone()));
+    ws.init_keys_from(None, Some(dir));
+    run_command(&mut ws, "nmap");
+    let text = popup_text(&ws);
+    assert!(text.contains("keys:1:") && !text.contains("bad:1:"), "{text}");
+    ws.state.popup = None;
+    ws.state.modality_stack.pop();
+    run_command(&mut ws, "theme");
+    let text = popup_text(&ws);
+    assert!(text.contains("bad:1:") && !text.contains("keys:1:"), "{text}");
 }

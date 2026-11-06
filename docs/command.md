@@ -45,6 +45,7 @@ The currently supported commands are:
 * `select-sheet <name>` Select a sheet by name.
 * `edit <path>` Open a spreadsheet from the given path. Format is auto-detected from the file extension (`.xlsx` → Excel, `.csv` → CSV, everything else → `.sui`). `e` is a shorthand alias for this command.
 * `help [topic]` Display help for a given topic.
+* `config` list every warning from loading the config file, the keys file and the theme at startup, with its file and line, or say there are none.
 * `theme [name]` Switch to a theme. With no name, lists the built-in and user themes and any warnings from the last theme load. See [Themes](./themes.md).
 * `export-csv <path>` Export the current sheet to a csv file at `<path>`.
 * `quit` Quits the application. `q` is a shorthand alias for this command.
