@@ -17,13 +17,14 @@ const ALLOWED: &str = "set, theme, nnoremap, vnoremap, nunmap and vunmap work in
 /// Blank lines and lines starting with `#` are skipped. A leading `:` is
 /// optional. A line that does not parse, is not allowed, or fails to apply is
 /// skipped and reported with `source` and its 1-based line number. The lines
-/// after it still run. `theme` lines belong to the theme loader and are
-/// skipped here.
+/// after it still run. A `theme <name>` line sets `theme` to the name; the last
+/// one wins, as `:theme` does at runtime. The theme itself is loaded later.
 pub fn load(
     text: &str,
     source: &str,
     options: &mut Options,
     keymap: &mut KeyMap,
+    theme: &mut Option<String>,
 ) -> Vec<Warning> {
     let mut warnings = Vec::new();
     for (idx, raw) in text.lines().enumerate() {
@@ -32,7 +33,7 @@ pub fn load(
             continue;
         }
         let command_text = trimmed.strip_prefix(':').unwrap_or(trimmed);
-        if let Err(msg) = run_line(command_text, options, keymap) {
+        if let Err(msg) = run_line(command_text, options, keymap, theme) {
             warnings.push(Warning {
                 source: source.to_owned(),
                 line: idx + 1,
@@ -43,14 +44,23 @@ pub fn load(
     warnings
 }
 
-fn run_line(text: &str, options: &mut Options, keymap: &mut KeyMap) -> Result<(), String> {
+fn run_line(
+    text: &str,
+    options: &mut Options,
+    keymap: &mut KeyMap,
+    theme: &mut Option<String>,
+) -> Result<(), String> {
     if let Some(command) = keys::command::parse(text)? {
         return keymap.apply(command);
     }
     let word = text.split_whitespace().next().unwrap_or(text);
     match cmd::parse(text) {
         Ok(Some(Cmd::Set(args))) => options.set(args).map(|_| ()),
-        Ok(Some(Cmd::Theme(_))) => Ok(()),
+        Ok(Some(Cmd::Theme(Some(name)))) => {
+            *theme = Some(name.to_owned());
+            Ok(())
+        }
+        Ok(Some(Cmd::Theme(None))) => Err("theme needs a name".to_owned()),
         Ok(Some(_)) => Err(format!("{word} is not allowed: only {ALLOWED}")),
         Ok(None) => Err(format!("unknown command {word}: only {ALLOWED}")),
         Err(msg) => Err(msg.to_owned()),
@@ -62,6 +72,8 @@ fn run_line(text: &str, options: &mut Options, keymap: &mut KeyMap) -> Result<()
 pub struct Loaded {
     /// The file that was read, or tried.
     pub path: Option<PathBuf>,
+    /// The name from the last `theme` line.
+    pub theme: Option<String>,
     pub warnings: Vec<Warning>,
 }
 
@@ -76,11 +88,13 @@ pub fn load_file(
         return Loaded::default();
     };
     let path = dir.join("config");
+    let mut theme = None;
     match std::fs::read_to_string(&path) {
         Ok(text) => {
-            let warnings = load(&text, &source_name(&path), options, keymap);
+            let warnings = load(&text, &source_name(&path), options, keymap, &mut theme);
             Loaded {
                 path: Some(path),
+                theme,
                 warnings,
             }
         }
@@ -90,6 +104,7 @@ pub fn load_file(
             let source = source_name(&path);
             Loaded {
                 path: Some(path),
+                theme: None,
                 warnings: vec![Warning {
                     source,
                     line: 0,

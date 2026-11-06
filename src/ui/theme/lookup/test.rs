@@ -98,18 +98,6 @@ fn unreadable_file_falls_back_with_warning() {
 }
 
 #[test]
-fn read_config_is_lenient() {
-    let dir = temp_dir("config");
-    assert_eq!(None, read_config(&dir), "missing file");
-    write(&dir, "config", "# nothing\nother 1\n\n");
-    assert_eq!(None, read_config(&dir), "no theme line");
-    write(&dir, "config", "other 1\n  theme   light  \ntheme dracula\n");
-    assert_eq!(Some("light".to_owned()), read_config(&dir));
-    write(&dir, "config", "theme\ntheme terminal extra\n");
-    assert_eq!(Some("terminal".to_owned()), read_config(&dir), "bare theme line skipped");
-}
-
-#[test]
 fn list_has_builtins_and_user_themes_sorted() {
     let dir = temp_dir("list");
     write(&dir, "mine.theme", "");

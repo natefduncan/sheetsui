@@ -174,6 +174,8 @@ pub struct AppState<'ws> {
     pub theme_warnings: Vec<Warning>,
     /// The user themes directory. `None` means there are only built-ins.
     pub themes_dir: Option<PathBuf>,
+    /// The name from the last `theme` line in the config file.
+    pub config_theme: Option<String>,
     pub message: Option<Message>,
     dirty: bool,
     popup: Option<Markdown>,
@@ -200,6 +202,7 @@ impl<'ws> Default for AppState<'ws> {
             theme: Theme::default(),
             theme_warnings: Vec::new(),
             themes_dir: None,
+            config_theme: None,
             message: None,
             dirty: false,
             popup: Default::default(),
@@ -2183,14 +2186,14 @@ impl<'ws> Workspace<'ws> {
         }
     }
 
-    /// Chooses the startup theme from the flag, then the config file, then the
+    /// Chooses the startup theme from the flag, then the config file's last `theme` line (run `init_config` first), then the
     /// default. Never fails: a bad theme falls back to `default` with a message.
     pub fn init_theme(&mut self, flag: Option<&str>) {
         self.init_theme_from(flag, lookup::config_dir());
     }
 
     fn init_theme_from(&mut self, flag: Option<&str>, config_dir: Option<PathBuf>) {
-        let config = config_dir.as_deref().and_then(lookup::read_config);
+        let config = self.state.config_theme.clone();
         let themes_dir = config_dir.map(|d| d.join("themes"));
         let (theme, warnings) = lookup::resolve(flag, config.as_deref(), themes_dir.as_deref());
         self.state.themes_dir = themes_dir;
@@ -2235,6 +2238,7 @@ impl<'ws> Workspace<'ws> {
             &mut self.state.keymap,
         );
         self.state.keymap.warnings = loaded.warnings;
+        self.state.config_theme = loaded.theme;
         self.report_key_warnings();
     }
 

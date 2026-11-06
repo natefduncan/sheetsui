@@ -30,19 +30,6 @@ pub fn config_dir() -> Option<PathBuf> {
     Some(base.join("sheetui"))
 }
 
-/// The value of the first `theme <name>` line in `dir/config`. Other lines and
-/// a missing or unreadable file are ignored.
-pub fn read_config(dir: &Path) -> Option<String> {
-    let text = std::fs::read_to_string(dir.join("config")).ok()?;
-    text.lines().find_map(|line| {
-        let mut parts = line.split_whitespace();
-        match (parts.next(), parts.next()) {
-            (Some("theme"), Some(name)) => Some(name.to_owned()),
-            _ => None,
-        }
-    })
-}
-
 fn builtin(name: &str) -> Option<&'static str> {
     BUILTIN.iter().find(|(n, _)| *n == name).map(|(_, t)| *t)
 }

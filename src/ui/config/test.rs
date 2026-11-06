@@ -6,7 +6,7 @@ use crate::ui::{keys::map::KeyMap, options::Options};
 fn run(text: &str) -> (Options, KeyMap, Vec<Warning>) {
     let mut options = Options::default();
     let mut keymap = KeyMap::default();
-    let warnings = load(text, "config", &mut options, &mut keymap);
+    let warnings = load(text, "config", &mut options, &mut keymap, &mut None);
     (options, keymap, warnings)
 }
 
@@ -71,7 +71,6 @@ fn test_bad_options_are_one_warning_and_apply_nothing_on_that_line() {
 fn test_bad_mapping_warns_and_theme_and_unknown_lines() {
     let (_, keymap, warnings) = run("nnoremap <Nope> j\ntheme dracula\nother 1\nnnoremap a j\n");
     assert_eq!(1, keymap.nav.mappings().len());
-    // `theme` is the theme loader's line, not a warning here.
     let lines: Vec<usize> = warnings.iter().map(|w| w.line).collect();
     assert_eq!(vec![1, 3], lines);
 }
@@ -112,4 +111,32 @@ fn test_unreadable_config_is_a_warning() {
     let loaded = load_file(Some(&dir), &mut options, &mut keymap);
     assert_eq!(1, loaded.warnings.len());
     assert!(loaded.warnings[0].msg.contains("cannot read"));
+}
+
+#[test]
+fn test_theme_lines_set_the_theme_and_the_last_one_wins() {
+    let mut theme = None;
+    let warnings = load(
+        "theme light\n:theme dracula\n",
+        "config",
+        &mut Options::default(),
+        &mut KeyMap::default(),
+        &mut theme,
+    );
+    assert!(warnings.is_empty());
+    assert_eq!(Some("dracula".to_owned()), theme);
+}
+
+#[test]
+fn test_bare_theme_line_warns_and_keeps_the_earlier_theme() {
+    let mut theme = None;
+    let warnings = load(
+        "theme light\ntheme\n",
+        "config",
+        &mut Options::default(),
+        &mut KeyMap::default(),
+        &mut theme,
+    );
+    assert_eq!(vec![2], warnings.iter().map(|w| w.line).collect::<Vec<_>>());
+    assert_eq!(Some("light".to_owned()), theme);
 }

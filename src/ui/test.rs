@@ -1152,7 +1152,7 @@ fn test_config_warnings_are_counted_and_listed_by_nmap() {
 #[test]
 fn test_config_with_theme_or_unrelated_lines_still_loads_the_theme() {
     let dir = temp_config_dir("config-theme");
-    std::fs::write(dir.join("config"), "other 1\ntheme terminal\n").unwrap();
+    std::fs::write(dir.join("config"), "other 1\ntheme light\ntheme terminal\n").unwrap();
     let mut ws = new_workspace();
     ws.init_config_from(Some(dir.clone()));
     ws.init_theme_from(None, Some(dir));
@@ -3266,6 +3266,7 @@ fn test_init_theme_flag_beats_config_and_bad_name_falls_back() {
     let dir = temp_config_dir("init");
     std::fs::write(dir.join("config"), "theme terminal\n").unwrap();
     let mut ws = new_workspace();
+    ws.init_config_from(Some(dir.clone()));
     ws.init_theme_from(None, Some(dir.clone()));
     assert_eq!("terminal", ws.state.theme.name);
     ws.init_theme_from(Some("light"), Some(dir.clone()));

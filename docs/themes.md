@@ -8,7 +8,8 @@ sheetui picks a theme in this order:
 
 1. `--theme <name-or-path>` on the command line.
 2. A `theme <name>` line in `$XDG_CONFIG_HOME/sheetui/config` (by default
-   `~/.config/sheetui/config`).
+   `~/.config/sheetui/config`). If the file has several `theme` lines, the last
+   one is used, as `:theme` does at runtime.
 3. The built-in `default`.
 
 You can also switch while sheetui runs with `:theme <name>`. `:theme` with no
