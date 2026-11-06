@@ -24,6 +24,7 @@ theme dracula
 set ignorecase smartcase
 set searchin=raw
 set nowrapscan
+set defaultwidth=24
 
 # Space then w saves.
 nnoremap <Space>w <Cmd>write<CR>

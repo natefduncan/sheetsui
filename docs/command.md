@@ -65,6 +65,20 @@ The currently supported commands are:
 
 Inserting rows at or above the last frozen row (or columns at or left of the last frozen column) grows the freeze by the number inserted. Inserting below or right of the freeze leaves it alone. Undoing an insert does not change the freeze.
 
+## Column widths
+
+A width is a number of terminal characters, from 1 to 255. `:col-width`, `:autofit-cols`, `<C-l>` and `<C-h>` all keep to that range. `<C-l>` stops at 255 and `<C-h>` at 1; at the limit the key does nothing and says nothing.
+
+* `:col-width 24` sets the cursor column to 24 characters, and `:col-width 24 3` sets three columns going right from it.
+* `:col-width default` clears the cursor column's width, and `:autofit-cols 2` fits two columns.
+
+* A column with no width of its own shows the `defaultwidth` option (18 unless you change it). `:col-width default` is the way to reset a column that has content.
+* `:autofit-cols` clamps the result to 3 to 60 characters. A column with nothing to measure is reset to the `defaultwidth` value rather than shrunk to 3.
+* Each command is one undo step, however many columns it changes, and says what it did on the message line, such as `Column C width 20`. `5<C-l>` is one undo step too.
+* A column wider than the room on screen is drawn clipped to the room that is left. Its saved width does not change, and the message line says it is drawn clipped while the cursor is in it.
+* **Units.** Widths are in terminal characters and are saved at 5 pixels each in `.xlsx` files. Excel's own scale is 9 pixels a character, so a column fitted here can look narrow when the file is opened in Excel.
+* A column set to exactly 18 counts as having no width of its own, and follows `defaultwidth`. Use `:col-width 19`, or change the option, instead.
+
 ## Deleting rows and columns
 
 `:delete-rows` and `:delete-cols` ask for no confirmation. `u` undoes a delete in one step, and puts the cursor back where it was. A count of 0, a count that is not a whole number, or a count past the end of the sheet is an error and changes nothing. So is a delete that cuts through part of an array formula. A delete that covers the whole array formula removes it.
