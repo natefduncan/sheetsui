@@ -34,6 +34,7 @@ The currently supported commands are:
 * `fill-down [count]` copies the cell above onto the cursor cell, moving formula references and copying formats. With a count it fills that many cells down from the cursor, all from the cell above the cursor. `<C-d>` does the same in navigation mode. See [Filling](#filling).
 * `fill-right [count]` Just like `fill-down` but copies the cell to the left, to the right. `<C-r>` does the same in navigation mode.
 * `fill-series <up|down|left|right> <count>` takes the selection, or the cursor cell, as seeds and extends it by count cells in that direction, continuing a series. See [Filling](#filling).
+* `col-width <1-255> [count]` sets the cursor column, or `count` columns going right from it, to that many characters. It is one undo step. A missing or bad width, a count of 0, or a count that runs past the last column is an error, and no width changes.
 * `freeze` with no arguments pins every row above and every column left of the cursor, counted from row 1 and column A even when the sheet is scrolled. On A1 there is nothing to pin, so nothing changes and a message says so.
 * `freeze <rows> [cols]` pin that many rows (and columns) so they stay visible while the rest scrolls. `freeze 0 0` clears it. The freeze is kept per sheet, is not undoable, and is saved in `.xlsx` files only. A line marks the boundary, styled by the `freeze.line` theme slot.
 * `unfreeze` clear the freeze on the current sheet. The same as `freeze 0 0`.

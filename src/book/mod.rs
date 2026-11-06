@@ -1154,6 +1154,22 @@ impl Book {
         Ok(())
     }
 
+    /// Set `count` columns, from `first` going right, to `width` characters
+    /// as one undo step. Nothing changes if the columns run past the last
+    /// column.
+    pub fn set_col_widths(&mut self, first: usize, count: usize, width: usize) -> Result<()> {
+        if count == 0 || first + count - 1 > LAST_COLUMN as usize {
+            return Err(anyhow!("The columns run past column {LAST_COLUMN}"));
+        }
+        let sheet = self.location.sheet;
+        self.as_action(|book| {
+            for col in first..first + count {
+                book.set_column_size_for_sheet(sheet, col, width)?;
+            }
+            Ok(())
+        })
+    }
+
     // Get the size of the current sheet as a `(row_count, column_count)`
     pub fn get_size(&self) -> Result<(usize, usize)> {
         let sheet = &self.get_sheet()?.sheet_data;

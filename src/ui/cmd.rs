@@ -16,6 +16,9 @@ pub enum Cmd<'a> {
     FillDown(usize),
     FillRight(usize),
     FillSeries(FillDirection, usize),
+    /// `:col-width <1-255> [count]`: set `count` columns, from the cursor
+    /// going right, to `width` characters.
+    ColWidth { width: usize, count: usize },
     ColorRows(Option<usize>, String),
     ColorColumns(Option<usize>, String),
     ColorCell(String),
@@ -108,6 +111,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_fill_series(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_col_width(cursor.clone())? {
         return Ok(Some(cmd));
     }
     // Try consume export
@@ -421,6 +427,39 @@ fn try_consume_fill_series<'cmd, 'i: 'cmd>(
         return Err(USAGE);
     }
     Ok(Some(Cmd::FillSeries(direction, count)))
+}
+
+/// The widest column `:col-width` and `<C-l>` allow.
+pub const MAX_COL_WIDTH: usize = 255;
+
+fn try_consume_col_width<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "col-width";
+    const USAGE: &str = "Usage: col-width <1-255|default> [count]";
+
+    if !compare(input.clone(), LONG) {
+        return Ok(None);
+    }
+    input.seek(LONG.len());
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err(USAGE);
+    }
+    let arg = input.span(0..).trim();
+    let mut words = arg.split_whitespace();
+    let width = match words.next().map(|w| w.parse::<usize>()) {
+        Some(Ok(width)) if (1..=MAX_COL_WIDTH).contains(&width) => width,
+        _ => return Err(USAGE),
+    };
+    let count = match words.next().map(|w| w.parse::<usize>()) {
+        None => 1,
+        Some(Ok(count)) if count > 0 => count,
+        _ => return Err(USAGE),
+    };
+    if words.next().is_some() {
+        return Err(USAGE);
+    }
+    Ok(Some(Cmd::ColWidth { width, count }))
 }
 
 fn try_consume_delete_row<'cmd, 'i: 'cmd>(

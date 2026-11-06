@@ -924,6 +924,25 @@ impl<'ws> Workspace<'ws> {
             Ok(Some(Cmd::FillDown(count))) => self.fill_down(count),
             Ok(Some(Cmd::FillRight(count))) => self.fill_right(count),
             Ok(Some(Cmd::FillSeries(dir, count))) => self.fill_series(dir, count),
+            Ok(Some(Cmd::ColWidth { width, count })) => {
+                let first = self.book.location.col;
+                match self.book.set_col_widths(first, count, width) {
+                    Ok(()) => {
+                        let name = |c: usize| number_to_column(c as i32).unwrap_or_default();
+                        let text = if count == 1 {
+                            format!("Column {} width {width}", name(first))
+                        } else {
+                            format!("Columns {}:{} width {width}", name(first), name(first + count - 1))
+                        };
+                        self.set_message(MessageLevel::Info, text);
+                    }
+                    Err(_) => self.set_message(
+                        MessageLevel::Error,
+                        "Usage: col-width <1-255|default> [count]: the columns run past the last column".to_string(),
+                    ),
+                }
+                Ok(None)
+            }
             Ok(Some(Cmd::RenameSheet(idx, name))) => {
                 match idx {
                     Some(idx) => {

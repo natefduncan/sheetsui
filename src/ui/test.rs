@@ -5591,3 +5591,68 @@ fn test_nmap_and_theme_dialogs_stay_filtered() {
     let text = popup_text(&ws);
     assert!(text.contains("bad:1:") && !text.contains("keys:1:"), "{text}");
 }
+
+#[test]
+fn test_col_width_cmd_forms_and_usage_errors() {
+    assert_eq!(Cmd::ColWidth { width: 20, count: 1 }, parse("col-width 20").unwrap().unwrap());
+    assert_eq!(Cmd::ColWidth { width: 1, count: 5 }, parse("col-width 1 5").unwrap().unwrap());
+    assert_eq!(Cmd::ColWidth { width: 255, count: 1 }, parse("col-width 255").unwrap().unwrap());
+    for bad in ["col-width", "col-width 0", "col-width 256", "col-width x", "col-width 1.5", "col-width -3", "col-width 20 0", "col-width 20 x", "col-width 20 2 3", "col-widthx"] {
+        let err = parse(bad).expect_err(bad);
+        assert!(err.contains("Usage: col-width <1-255|default> [count]"), "{bad}: {err}");
+    }
+}
+
+#[test]
+fn test_col_width_sets_columns_and_says_so() {
+    let mut ws = new_workspace();
+    let col = ws.book.location.col;
+    run_command(&mut ws, "col-width 20");
+    assert_eq!(20, ws.book.get_col_size(col).unwrap());
+    assert_eq!(Some("Column A width 20".to_owned()), last_message(&ws));
+    run_command(&mut ws, "col-width 7 3");
+    for c in col..col + 3 {
+        assert_eq!(7, ws.book.get_col_size(c).unwrap());
+    }
+    assert_eq!(Some("Columns A:C width 7".to_owned()), last_message(&ws));
+    run_command(&mut ws, "col-width 255");
+    assert_eq!(255, ws.book.get_col_size(col).unwrap());
+    run_command(&mut ws, "col-width 1");
+    assert_eq!(1, ws.book.get_col_size(col).unwrap());
+}
+
+#[test]
+fn test_col_width_errors_change_nothing() {
+    let mut ws = new_workspace();
+    let before = ws.book.get_col_size(1).unwrap();
+    for bad in ["col-width", "col-width 0", "col-width 256", "col-width x", "col-width 9 0"] {
+        let mut ws = new_workspace();
+        run_command(&mut ws, bad);
+        assert_eq!(before, ws.book.get_col_size(1).unwrap(), "{bad}");
+        assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last(), "{bad}");
+    }
+    // A late failure at the count: start at the last column.
+    ws.book.location.col = crate::book::LAST_COLUMN as usize;
+    let last = ws.book.get_col_size(crate::book::LAST_COLUMN as usize).unwrap();
+    run_command(&mut ws, "col-width 9 2");
+    assert_eq!(last, ws.book.get_col_size(crate::book::LAST_COLUMN as usize).unwrap());
+    assert!(ws.state.message.as_ref().unwrap().text.contains("Usage"));
+    // The last column alone still works.
+    run_command(&mut ws, "col-width 9");
+    assert_eq!(9, ws.book.get_col_size(crate::book::LAST_COLUMN as usize).unwrap());
+}
+
+#[test]
+fn test_col_width_is_one_undo_step_and_redoes() {
+    let mut ws = new_workspace();
+    let before = ws.book.get_col_size(1).unwrap();
+    run_command(&mut ws, "col-width 9 4");
+    run(&mut ws, script().char('u'));
+    for c in 1..=4 {
+        assert_eq!(before, ws.book.get_col_size(c).unwrap());
+    }
+    run_command(&mut ws, "redo");
+    for c in 1..=4 {
+        assert_eq!(9, ws.book.get_col_size(c).unwrap());
+    }
+}

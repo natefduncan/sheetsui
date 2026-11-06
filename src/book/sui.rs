@@ -225,6 +225,15 @@ pub fn serialize_sui(book: &Book) -> String {
             .copied()
             .max()
             .unwrap_or(0);
+        // A width can be set on a column that holds no data.
+        let max_col = ws
+            .cols
+            .iter()
+            .map(|c| c.max)
+            .max()
+            .unwrap_or(0)
+            .min(LAST_COLUMN)
+            .max(max_col);
 
         // Determine the ironcalc default column width by reading an
         // out-of-range column that was never explicitly set.

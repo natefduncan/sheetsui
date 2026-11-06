@@ -2259,3 +2259,31 @@ fn test_fill_series_is_one_undo_step() {
     book.undo().expect("undo");
     assert_eq!(column(&book, 1, 1..=5), vec!["1", "2", "", "", ""]);
 }
+
+#[test]
+fn test_set_col_widths_round_trip_sui_and_xlsx() {
+    let mut book = Book::default();
+    book.update_cell(&Address { sheet: 0, row: 1, col: 1 }, "1").unwrap();
+    book.set_col_widths(2, 3, 30).unwrap();
+    book.set_col_widths(1, 1, 255).unwrap();
+    for ext in ["sui", "xlsx"] {
+        let path = tmp_path(&format!("col_widths.{ext}"));
+        book.save_as(&path).unwrap();
+        let loaded = Book::load(&path, "en", "America/New_York").unwrap();
+        assert_eq!(255, loaded.get_col_size(1).unwrap(), "{ext}");
+        for c in 2..=4 {
+            assert_eq!(30, loaded.get_col_size(c).unwrap(), "{ext}");
+        }
+    }
+}
+
+#[test]
+fn test_set_col_widths_past_the_last_column_changes_nothing() {
+    let mut book = Book::default();
+    let last = crate::book::LAST_COLUMN as usize;
+    let before = book.get_col_size(last).unwrap();
+    assert!(book.set_col_widths(last, 2, 9).is_err());
+    assert!(book.set_col_widths(1, 0, 9).is_err());
+    assert_eq!(before, book.get_col_size(last).unwrap());
+    assert!(!book.undo().unwrap());
+}
