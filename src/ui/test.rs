@@ -6002,3 +6002,86 @@ fn test_format_cmd_never_changes_col_width() {
     run_command(&mut ws, "format currency");
     assert_eq!(before, ws.book.get_col_size(1).unwrap());
 }
+
+#[test]
+fn test_format_span_cmd_parse() {
+    assert_eq!(Cmd::FormatCols(None, "percent"), parse("format-cols percent").unwrap().unwrap());
+    assert_eq!(Cmd::FormatCols(Some(3), "percent"), parse("format-cols 3 percent").unwrap().unwrap());
+    assert_eq!(Cmd::FormatCols(None, "0"), parse("format-cols 0").unwrap().unwrap());
+    assert_eq!(Cmd::FormatCols(Some(3), "0"), parse("format-cols 3 0").unwrap().unwrap());
+    assert_eq!(
+        Cmd::FormatRows(Some(2), "0.00 \"USD\""),
+        parse("format-rows 2 0.00 \"USD\"").unwrap().unwrap()
+    );
+    assert_eq!(Cmd::FormatRows(None, "0.000"), parse("format-rows 0.000").unwrap().unwrap());
+    assert_eq!(Err("Usage: format-cols [count] <preset|code>"), parse("format-cols"));
+    assert_eq!(Err("Usage: format-rows [count] <preset|code>"), parse("format-rows  "));
+    assert_eq!(Err("Usage: format-rows [count] <preset|code>"), parse("format-rowsx"));
+}
+
+#[test]
+fn test_format_cols_cursor_and_count_one_undo() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "format-cols 0.000");
+    assert_eq!("0.000", fmt_of(&ws, 1, 1));
+    assert_eq!("0.000", fmt_of(&ws, 500, 1));
+    assert_eq!("General", fmt_of(&ws, 1, 2));
+    assert_eq!(Some("Format 0.000: column A".to_owned()), last_message(&ws));
+    run_command(&mut ws, "format-cols 3 Percent");
+    for c in 1..=3 {
+        assert_eq!("0.00%", fmt_of(&ws, 7, c), "{c}");
+    }
+    assert_eq!("General", fmt_of(&ws, 7, 4));
+    assert_eq!(Some("Format percent: columns A:C".to_owned()), last_message(&ws));
+    run_command(&mut ws, "undo");
+    assert_eq!("0.000", fmt_of(&ws, 7, 1));
+    assert_eq!("General", fmt_of(&ws, 7, 2));
+}
+
+#[test]
+fn test_format_rows_cursor_and_count() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "format-rows 2 date");
+    assert_eq!("yyyy-mm-dd", fmt_of(&ws, 1, 1));
+    assert_eq!("yyyy-mm-dd", fmt_of(&ws, 2, 300));
+    assert_eq!("General", fmt_of(&ws, 3, 1));
+    assert_eq!(Some("Format date: rows 1:2".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_format_span_errors_change_nothing() {
+    let mut ws = new_workspace();
+    for cmd in ["format-cols 0 percent", "format-cols 16385 percent", "format-rows 0 percent"] {
+        run_command(&mut ws, cmd);
+        assert_eq!(super::MessageLevel::Error, ws.state.message.as_ref().unwrap().level, "{cmd}");
+        assert_eq!("General", fmt_of(&ws, 1, 1), "{cmd}");
+    }
+    run_command(&mut ws, "format-cols \"abc");
+    assert_eq!(Some("Invalid number format: \"abc".to_owned()), last_message(&ws));
+    assert_eq!("General", fmt_of(&ws, 1, 1));
+}
+
+#[test]
+fn test_format_cols_range_select_ignores_count() {
+    let mut ws = new_workspace();
+    script().chars("l").char('v').chars("jjl").char(':').chars("format-cols 9 percent").enter()
+        .run(&mut ws).expect("script");
+    assert_eq!("General", fmt_of(&ws, 1, 1));
+    assert_eq!("0.00%", fmt_of(&ws, 1, 2));
+    assert_eq!("0.00%", fmt_of(&ws, 900, 3));
+    assert_eq!("General", fmt_of(&ws, 1, 4));
+    assert_eq!(Some("Format percent: columns B:C".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_format_rows_range_select_and_width_unchanged() {
+    let mut ws = new_workspace();
+    let width = ws.book.get_col_size(1).unwrap();
+    script().char('j').char('v').chars("jl").char(':').chars("format-rows currency").enter()
+        .run(&mut ws).expect("script");
+    assert_eq!("General", fmt_of(&ws, 1, 1));
+    assert_eq!("$#,##0.00", fmt_of(&ws, 2, 50));
+    assert_eq!("$#,##0.00", fmt_of(&ws, 3, 1));
+    assert_eq!("General", fmt_of(&ws, 4, 1));
+    assert_eq!(width, ws.book.get_col_size(1).unwrap());
+}

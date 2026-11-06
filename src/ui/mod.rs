@@ -1032,6 +1032,14 @@ impl<'ws> Workspace<'ws> {
                 self.format_cells(arg);
                 Ok(None)
             }
+            Ok(Some(Cmd::FormatCols(count, fmt))) => {
+                self.format_span(true, count, fmt);
+                Ok(None)
+            }
+            Ok(Some(Cmd::FormatRows(count, fmt))) => {
+                self.format_span(false, count, fmt);
+                Ok(None)
+            }
             Ok(Some(Cmd::SystemPaste)) => {
                 let rows = self.get_rows_from_system_clipboard()?;
                 self.state.clipboard = Some(ClipboardContents::Range(rows));
@@ -1720,6 +1728,55 @@ impl<'ws> Workspace<'ws> {
                 self.set_message(MessageLevel::Info, format!("Format {name}: {what}"));
             }
             Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
+        }
+    }
+
+    /// `:format-cols` and `:format-rows`. In range select the columns or rows
+    /// the selection touches, ignoring `count`; else `count` from the cursor.
+    fn format_span(&mut self, cols: bool, count: Option<usize>, arg: &str) {
+        if self.in_cell_edit_range_select() {
+            return;
+        }
+        let (kind, usage) = if cols {
+            ("column", "Usage: format-cols [count] <preset|code>")
+        } else {
+            ("row", "Usage: format-rows [count] <preset|code>")
+        };
+        let (first, count) = match self.fill_selection() {
+            Some((a, b)) if cols => (a.col.min(b.col), a.col.max(b.col) - a.col.min(b.col) + 1),
+            Some((a, b)) => (a.row.min(b.row), a.row.max(b.row) - a.row.min(b.row) + 1),
+            None => (
+                if cols { self.book.location.col } else { self.book.location.row },
+                count.unwrap_or(1),
+            ),
+        };
+        let preset = number_format_preset(arg);
+        let code = preset.unwrap_or(arg);
+        let result = if cols {
+            self.book.set_number_format_cols(first, count, code)
+        } else {
+            self.book.set_number_format_rows(first, count, code)
+        };
+        match result {
+            Ok(()) => {
+                let name = |i: usize| {
+                    if cols { number_to_column(i as i32).unwrap_or_default() } else { i.to_string() }
+                };
+                let what = if count == 1 {
+                    format!("{kind} {}", name(first))
+                } else {
+                    format!("{kind}s {}:{}", name(first), name(first + count - 1))
+                };
+                let shown = if preset.is_some() { arg.to_lowercase() } else { arg.to_string() };
+                self.set_message(MessageLevel::Info, format!("Format {shown}: {what}"));
+            }
+            Err(e) if e.to_string().starts_with("Invalid number format") => {
+                self.set_message(MessageLevel::Error, e.to_string())
+            }
+            Err(_) => self.set_message(
+                MessageLevel::Error,
+                format!("{usage}: the count must be at least 1 and stay within the sheet"),
+            ),
         }
     }
 

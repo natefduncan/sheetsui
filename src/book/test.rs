@@ -2533,3 +2533,49 @@ fn test_number_format_preset_roundtrip_sui_and_xlsx() {
         }
     }
 }
+
+#[test]
+fn test_set_number_format_cols_overrides_and_is_one_undo() {
+    let mut book = Book::default();
+    book.update_cell(&phase2_addr(2, 2), "5").expect("edit");
+    book.set_number_format("0.000", &fmt_area(2, 2, 1, 1)).expect("format");
+    let start = std::time::Instant::now();
+    book.set_number_format_cols(2, 2, "0.00%").expect("cols");
+    assert!(start.elapsed().as_secs() < 5, "a whole column range is slow");
+    for (r, c) in [(1, 2), (2, 2), (1000, 3), (1_048_576, 3)] {
+        assert_eq!(book.get_number_format(&phase2_addr(r, c)).as_deref(), Some("0.00%"), "{r}:{c}");
+    }
+    assert_eq!(book.get_number_format(&phase2_addr(1, 1)).as_deref(), Some("General"));
+    assert_eq!(book.get_number_format(&phase2_addr(1, 4)).as_deref(), Some("General"));
+    assert!(book.undo().expect("undo"));
+    assert_eq!(book.get_number_format(&phase2_addr(2, 2)).as_deref(), Some("0.000"));
+    assert_eq!(book.get_number_format(&phase2_addr(1, 3)).as_deref(), Some("General"));
+}
+
+#[test]
+fn test_set_number_format_rows_overrides_and_is_one_undo() {
+    let mut book = Book::default();
+    book.set_number_format("0.000", &fmt_area(2, 2, 1, 1)).expect("format");
+    book.set_number_format_rows(2, 2, "yyyy-mm-dd").expect("rows");
+    for (r, c) in [(2, 1), (2, 2), (3, 16_384)] {
+        assert_eq!(book.get_number_format(&phase2_addr(r, c)).as_deref(), Some("yyyy-mm-dd"), "{r}:{c}");
+    }
+    assert_eq!(book.get_number_format(&phase2_addr(1, 1)).as_deref(), Some("General"));
+    assert_eq!(book.get_number_format(&phase2_addr(4, 1)).as_deref(), Some("General"));
+    assert!(book.undo().expect("undo"));
+    assert_eq!(book.get_number_format(&phase2_addr(2, 2)).as_deref(), Some("0.000"));
+}
+
+#[test]
+fn test_set_number_format_cols_rows_errors_change_nothing() {
+    let mut book = Book::default();
+    assert!(book.set_number_format_cols(1, 0, "0").is_err());
+    assert!(book.set_number_format_cols(16_384, 2, "0").is_err());
+    assert!(book.set_number_format_rows(1, 0, "0").is_err());
+    assert!(book.set_number_format_rows(1_048_576, 2, "0").is_err());
+    assert!(book.set_number_format_cols(1, 1, "\"abc").is_err());
+    assert!(book.set_number_format_rows(1, 1, "\"abc").is_err());
+    assert_eq!(book.get_number_format(&phase2_addr(1, 1)).as_deref(), Some("General"));
+    book.set_number_format_cols(16_384, 1, "0").expect("last column");
+    book.set_number_format_rows(1_048_576, 1, "0").expect("last row");
+}

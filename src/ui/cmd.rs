@@ -30,6 +30,10 @@ pub enum Cmd<'a> {
     /// `:format [<preset|code>]`: set the number format of the cursor cell or
     /// selection, or with no argument show the cursor cell's format.
     Format(Option<&'a str>),
+    /// `:format-cols [count] <preset|code>` and `:format-rows`: the count is
+    /// `None` when not written.
+    FormatCols(Option<usize>, &'a str),
+    FormatRows(Option<usize>, &'a str),
     RenameSheet(Option<usize>, &'a str),
     NewSheet(Option<&'a str>),
     SelectSheet(&'a str),
@@ -165,6 +169,12 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_color_cell(cursor.clone())? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_format_span(cursor.clone(), "format-cols")? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_format_span(cursor.clone(), "format-rows")? {
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_format(cursor.clone())? {
@@ -331,6 +341,40 @@ fn try_consume_format<'cmd, 'i: 'cmd>(
     // spaces and quotes.
     let arg = input.span(0..).trim();
     Ok(Some(Cmd::Format(if arg.is_empty() { None } else { Some(arg) })))
+}
+
+/// `format-cols` and `format-rows`: `[count] <preset|code>`. The count comes
+/// first and only when a format follows it, so `3 0` is three of format `0`
+/// and a lone `0` is the format `0`.
+fn try_consume_format_span<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+    long: &'static str,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const COLS_USAGE: &str = "Usage: format-cols [count] <preset|code>";
+    const ROWS_USAGE: &str = "Usage: format-rows [count] <preset|code>";
+    let cols = long == "format-cols";
+    let usage = if cols { COLS_USAGE } else { ROWS_USAGE };
+    if !compare(input.clone(), long) {
+        return Ok(None);
+    }
+    input.seek(long.len());
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err(usage);
+    }
+    let arg = input.span(0..).trim();
+    let (word, rest) = match arg.split_once(char::is_whitespace) {
+        Some((w, r)) => (w, r.trim()),
+        None => (arg, ""),
+    };
+    let (count, fmt) = if !rest.is_empty() && word.bytes().all(|b| b.is_ascii_digit()) {
+        (Some(word.parse::<usize>().map_err(|_| usage)?), rest)
+    } else {
+        (None, arg)
+    };
+    if fmt.is_empty() {
+        return Err(usage);
+    }
+    Ok(Some(if cols { Cmd::FormatCols(count, fmt) } else { Cmd::FormatRows(count, fmt) }))
 }
 
 fn try_consume_insert_row<'cmd, 'i: 'cmd>(

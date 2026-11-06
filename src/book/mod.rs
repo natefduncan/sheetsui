@@ -931,6 +931,40 @@ impl Book {
         self.set_cell_style(&[("num_fmt", code)], area)
     }
 
+    /// Set the number format of `count` whole columns from `first` on the
+    /// current sheet, overriding cells that already have their own format, as
+    /// one undo step. A count of 0 or columns past the last one are an error
+    /// and change nothing.
+    pub fn set_number_format_cols(&mut self, first: usize, count: usize, code: &str) -> Result<()> {
+        if first == 0 || count == 0 || first + count - 1 > LAST_COLUMN as usize {
+            return Err(anyhow!("The columns run past column {LAST_COLUMN}"));
+        }
+        let area = Area {
+            sheet: self.location.sheet,
+            row: 1,
+            column: first as i32,
+            width: count as i32,
+            height: LAST_ROW,
+        };
+        self.set_number_format(code, &area)
+    }
+
+    /// Set the number format of `count` whole rows from `first` on the
+    /// current sheet, as [`Book::set_number_format_cols`] does for columns.
+    pub fn set_number_format_rows(&mut self, first: usize, count: usize, code: &str) -> Result<()> {
+        if first == 0 || count == 0 || first + count - 1 > LAST_ROW as usize {
+            return Err(anyhow!("The rows run past row {LAST_ROW}"));
+        }
+        let area = Area {
+            sheet: self.location.sheet,
+            row: first as i32,
+            column: 1,
+            width: LAST_COLUMN,
+            height: count as i32,
+        };
+        self.set_number_format(code, &area)
+    }
+
     /// The number format code of a cell. ironcalc calls the default
     /// `general`; it is always reported as `General`.
     pub fn get_number_format(&self, cell: &Address) -> Option<String> {
