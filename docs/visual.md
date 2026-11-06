@@ -21,6 +21,8 @@ mode from navigation mode. See the `sort` command for more options.
 
 `d` deletes the rows the selection touches and `D` deletes its columns, then the sheet returns to navigation mode. A numeric prefix is ignored. Clearing the selection's contents is `<Del>`. See [Deleting rows and columns](./command.md#deleting-rows-and-columns).
 
+`w` fits every column the selection touches to the selected rows. A numeric prefix is ignored. `:col-width` and `:autofit-cols` also apply to those columns in this mode, and ignore their `count`.
+
 `<C-d>` fills each column of the selection down from its top cell and `<C-r>` fills each row right from its left cell. Range select mode stays active, so `<C-d>` then `<C-r>` fills a block from its top left cell. `x` stamps the start cell instead and does not copy formats. See [Filling](./command.md#filling).
 
 `:` opens the command prompt with `'<,'>`, the range of the selection, in

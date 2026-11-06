@@ -45,6 +45,8 @@ will clear the numeric prefix if you want to cancel it.
 
 {{keys:modify}}
 
+`gw` fits the cursor column to its contents, and `3gw` fits three columns going right. In range select mode `w` fits the columns the selection touches, measuring only the selected rows.
+
 `dd` deletes the row the cursor is on and `dc` the column. A lone `d` waits for the second key. A numeric prefix deletes that many: `3dd`. The `x` and `<Del>` keys clear a cell's contents. See [Deleting rows and columns](./command.md#deleting-rows-and-columns) for the freeze, formula and merged cell notes.
 
 `<C-d>` fills down and `<C-r>` fills right: the cell above (or to the left) is copied onto the cursor cell, and `5<C-d>` fills five cells. The cursor does not move. `:fill-series` continues a series. See [Filling](./command.md#filling). Entering range select mode is `<A-r>`; `<C-r>` used to do that.

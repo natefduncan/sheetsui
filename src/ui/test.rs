@@ -5700,3 +5700,101 @@ fn test_autofit_cols_errors_change_nothing() {
     assert!(last_message(&ws).unwrap().contains("Usage"));
     assert_eq!(before, ws.book.get_col_size(crate::book::LAST_COLUMN as usize).unwrap());
 }
+
+fn width_workspace<'a>() -> Workspace<'a> {
+    // Row 1 is short, row 3 is long, in columns A to C.
+    sort_workspace(&[
+        &["ab", "cd", "ef"],
+        &["abcdef", "cdefgh", "efghij"],
+        &["abcdefghijkl", "cdefghijklmn", "efghijklmnop"],
+    ])
+}
+
+#[test]
+fn test_gw_fits_the_cursor_column_and_3gw_fits_three() {
+    let mut ws = width_workspace();
+    run(&mut ws, script().chars("gw"));
+    assert_eq!(12, ws.book.get_col_size(1).unwrap());
+    assert_eq!(18, ws.book.get_col_size(2).unwrap());
+    assert_eq!(Some("Fitted column A".to_owned()), last_message(&ws));
+    run(&mut ws, script().chars("3gw"));
+    for c in 1..=3 {
+        assert_eq!(12, ws.book.get_col_size(c).unwrap());
+    }
+    assert_eq!(Some("Fitted 3 columns".to_owned()), last_message(&ws));
+    // One undo step for the three columns.
+    run(&mut ws, script().char('u'));
+    assert_eq!(12, ws.book.get_col_size(1).unwrap());
+    assert_eq!(18, ws.book.get_col_size(2).unwrap());
+}
+
+#[test]
+fn test_gw_past_the_last_column_is_an_error_that_changes_nothing() {
+    let mut ws = width_workspace();
+    ws.book.location.col = crate::book::LAST_COLUMN as usize;
+    run(&mut ws, script().chars("2gw"));
+    assert!(last_message(&ws).unwrap().contains("Usage"));
+}
+
+#[test]
+fn test_w_in_range_select_fits_touched_columns_over_the_selected_rows_only() {
+    let mut ws = width_workspace();
+    // Select A1:B2: the long row 3 is not measured.
+    run(&mut ws, script().chars("vjl"));
+    run(&mut ws, script().char('w'));
+    assert_eq!(6, ws.book.get_col_size(1).unwrap());
+    assert_eq!(6, ws.book.get_col_size(2).unwrap());
+    assert_eq!(18, ws.book.get_col_size(3).unwrap());
+    assert_eq!(Some(&Modality::RangeSelect), ws.state.modality_stack.last());
+    assert_eq!(Some("Fitted 2 columns".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_w_in_range_select_ignores_a_count() {
+    let mut ws = width_workspace();
+    run(&mut ws, script().chars("v"));
+    run(&mut ws, script().chars("3w"));
+    // Only A1 is selected, so only column A is fitted, to row 1 alone.
+    assert_eq!(3, ws.book.get_col_size(1).unwrap());
+    assert_eq!(18, ws.book.get_col_size(2).unwrap());
+}
+
+#[test]
+fn test_w_over_a_whole_column_matches_navigation_mode() {
+    let mut ws = width_workspace();
+    run(&mut ws, script().chars("vjj"));
+    run(&mut ws, script().char('w'));
+    assert_eq!(12, ws.book.get_col_size(1).unwrap());
+}
+
+#[test]
+fn test_col_commands_in_range_select_apply_to_touched_columns_and_ignore_count() {
+    let mut ws = width_workspace();
+    run(&mut ws, script().chars("vl"));
+    run_command(&mut ws, "col-width 30 5");
+    assert_eq!(30, ws.book.get_col_size(1).unwrap());
+    assert_eq!(30, ws.book.get_col_size(2).unwrap());
+    assert_eq!(18, ws.book.get_col_size(3).unwrap());
+    assert_eq!(Some("Columns A:B width 30".to_owned()), last_message(&ws));
+    run_command(&mut ws, "autofit-cols 5");
+    // Row 1 only: "ab" and "cd" are clamped up to 3.
+    assert_eq!(3, ws.book.get_col_size(1).unwrap());
+    assert_eq!(3, ws.book.get_col_size(2).unwrap());
+    assert_eq!(18, ws.book.get_col_size(3).unwrap());
+}
+
+#[test]
+fn test_gw_and_w_can_be_remapped_and_unmapped() {
+    let mut ws = width_workspace();
+    map_nav(&mut ws, "<Space>f", "gw");
+    run(&mut ws, script().chars(" f"));
+    assert_eq!(12, ws.book.get_col_size(1).unwrap());
+    let mut ws = width_workspace();
+    type_command(&mut ws, "nunmap gw");
+    run(&mut ws, script().chars("gw"));
+    assert_eq!(18, ws.book.get_col_size(1).unwrap());
+    let mut ws = width_workspace();
+    type_command(&mut ws, "vunmap w");
+    run(&mut ws, script().chars("vw"));
+    assert_eq!(18, ws.book.get_col_size(1).unwrap());
+}

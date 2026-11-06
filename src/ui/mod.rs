@@ -925,37 +925,11 @@ impl<'ws> Workspace<'ws> {
             Ok(Some(Cmd::FillRight(count))) => self.fill_right(count),
             Ok(Some(Cmd::FillSeries(dir, count))) => self.fill_series(dir, count),
             Ok(Some(Cmd::ColWidth { width, count })) => {
-                let first = self.book.location.col;
-                match self.book.set_col_widths(first, count, width) {
-                    Ok(()) => {
-                        let name = |c: usize| number_to_column(c as i32).unwrap_or_default();
-                        let text = if count == 1 {
-                            format!("Column {} width {width}", name(first))
-                        } else {
-                            format!("Columns {}:{} width {width}", name(first), name(first + count - 1))
-                        };
-                        self.set_message(MessageLevel::Info, text);
-                    }
-                    Err(_) => self.set_message(
-                        MessageLevel::Error,
-                        "Usage: col-width <1-255|default> [count]: the columns run past the last column".to_string(),
-                    ),
-                }
+                self.col_width(width, count);
                 Ok(None)
             }
             Ok(Some(Cmd::AutofitCols(count))) => {
-                let first = self.book.location.col;
-                match self.book.autofit_cols(first, count, None) {
-                    Ok(report) => {
-                        let name = |c: usize| number_to_column(c as i32).unwrap_or_default();
-                        let text = autofit_message(first, count, report, name);
-                        self.set_message(MessageLevel::Info, text);
-                    }
-                    Err(_) => self.set_message(
-                        MessageLevel::Error,
-                        "Usage: autofit-cols [count]: the columns run past the last column".to_string(),
-                    ),
-                }
+                self.autofit_cols(count);
                 Ok(None)
             }
             Ok(Some(Cmd::RenameSheet(idx, name))) => {
@@ -1137,6 +1111,10 @@ impl<'ws> Workspace<'ws> {
             }
             RangeHandler::DeleteCols => {
                 return self.delete_cols_or_selection(1);
+            }
+            RangeHandler::AutofitCols => {
+                self.state.reset_n_prefix();
+                self.autofit_cols(1);
             }
             RangeHandler::ClearRangeAll => {
                 if let Some((start, end)) = self.state.range_select.get_range() {
@@ -1467,6 +1445,11 @@ impl<'ws> Workspace<'ws> {
             NavHandler::ClearCellAll => {
                 self.book.clear_current_cell_all()?;
             }
+            NavHandler::AutofitCols => {
+                let count = self.state.get_n_prefix();
+                self.state.reset_n_prefix();
+                self.autofit_cols(count);
+            }
             NavHandler::ColWider => {
                 self.run_with_prefix(|ws: &mut Workspace<'_>| -> Result<()> {
                     let Address {
@@ -1660,6 +1643,61 @@ impl<'ws> Workspace<'ws> {
             self.state.range_select.current(&self.book.location)
         } else {
             None
+        }
+    }
+
+    /// The columns a column command applies to, and the rows an autofit
+    /// measures. In range select (started from navigation) that is every
+    /// column the selection touches and its rows, and `count` is ignored.
+    /// Otherwise it is `count` columns from the cursor, over every row.
+    fn col_targets(&self, count: usize) -> (usize, usize, Option<std::ops::RangeInclusive<usize>>) {
+        match self.fill_selection() {
+            Some((a, b)) => {
+                let (lo, hi) = (a.col.min(b.col), a.col.max(b.col));
+                let rows = a.row.min(b.row)..=a.row.max(b.row);
+                (lo, hi - lo + 1, Some(rows))
+            }
+            None => (self.book.location.col, count, None),
+        }
+    }
+
+    fn col_width(&mut self, width: usize, count: usize) {
+        if self.in_cell_edit_range_select() {
+            return;
+        }
+        let (first, count, _) = self.col_targets(count);
+        match self.book.set_col_widths(first, count, width) {
+            Ok(()) => {
+                let name = |c: usize| number_to_column(c as i32).unwrap_or_default();
+                let text = if count == 1 {
+                    format!("Column {} width {width}", name(first))
+                } else {
+                    format!("Columns {}:{} width {width}", name(first), name(first + count - 1))
+                };
+                self.set_message(MessageLevel::Info, text);
+            }
+            Err(_) => self.set_message(
+                MessageLevel::Error,
+                "Usage: col-width <1-255|default> [count]: the columns run past the last column".to_string(),
+            ),
+        }
+    }
+
+    fn autofit_cols(&mut self, count: usize) {
+        if self.in_cell_edit_range_select() {
+            return;
+        }
+        let (first, count, rows) = self.col_targets(count);
+        match self.book.autofit_cols(first, count, rows) {
+            Ok(report) => {
+                let name = |c: usize| number_to_column(c as i32).unwrap_or_default();
+                let text = autofit_message(first, count, report, name);
+                self.set_message(MessageLevel::Info, text);
+            }
+            Err(_) => self.set_message(
+                MessageLevel::Error,
+                "Usage: autofit-cols [count]: the columns run past the last column".to_string(),
+            ),
         }
     }
 
