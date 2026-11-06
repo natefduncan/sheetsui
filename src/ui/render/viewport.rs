@@ -39,6 +39,10 @@ pub struct ViewportState {
     pub(crate) freeze_clipped: bool,
     /// True once the clip message was shown, so it is not shown every frame.
     pub(crate) freeze_clip_reported: bool,
+    /// True when the cursor column is drawn narrower than its width.
+    pub(crate) col_clipped: bool,
+    /// True once the column clip message was shown for this column.
+    pub(crate) col_clip_reported: bool,
 }
 
 /// A renderable viewport over a book.
@@ -141,7 +145,7 @@ impl<'ws> Viewport<'ws> {
         &self,
         width: u16,
         state: &ViewportState,
-    ) -> Result<(usize, Vec<VisibleColumn>)> {
+    ) -> Result<(usize, Vec<VisibleColumn>, bool)> {
         // TODO(zaphar): This should be a shared constant with our first column.
         // We start out with a length of 5 already reserved
         let mut length = 5;
@@ -177,8 +181,15 @@ impl<'ws> Viewport<'ws> {
                 std::cmp::min(self.selected.col, state.prev_corner.col)
             },
         );
+        // A column never draws wider than the room left after the frozen part.
+        let room = width.saturating_sub(length + 1).max(1);
+        let mut cursor_clipped = false;
         for idx in start_idx..=(book::LAST_COLUMN as usize) {
-            let size = self.book.get_col_size(idx)? as u16;
+            let full = self.book.get_col_size(idx)? as u16;
+            let size = full.min(room);
+            if idx == self.selected.col && size < full {
+                cursor_clipped = true;
+            }
             let updated_length = length + size;
             let col = VisibleColumn { idx, length: size };
             if updated_length < width {
@@ -197,19 +208,16 @@ impl<'ws> Viewport<'ws> {
                 length += size;
                 visible.push(col);
                 // What if the length is still too long?
-                if length > width {
-                    if let Some(first) = visible.first() {
-                        // subtract the first columns size.
-                        length -= first.length;
-                    }
-                    visible = visible.into_iter().skip(1).collect();
+                while length > width && visible.len() > 1 {
+                    length -= visible[0].length;
+                    visible.remove(0);
                 }
             } else {
                 break;
             }
         }
         frozen.extend(visible);
-        Ok((nfrozen, frozen))
+        Ok((nfrozen, frozen, cursor_clipped))
     }
 
     pub fn block(mut self, block: Block<'ws>) -> Self {
@@ -223,7 +231,9 @@ impl<'ws> Viewport<'ws> {
         height: u16,
         state: &mut ViewportState,
     ) -> Result<Table<'widget>> {
-        let (frozen_cols, visible_columns) = self.visible_columns_split(width, state)?;
+        let (frozen_cols, visible_columns, cursor_clipped) =
+            self.visible_columns_split(width, state)?;
+        state.col_clipped = cursor_clipped;
         let visible_rows = self.get_visible_rows(height, state);
         if let Some(vc) = visible_columns.get(frozen_cols) {
             state.prev_corner.col = vc.idx

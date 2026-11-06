@@ -5875,3 +5875,42 @@ fn test_autofit_empty_column_resets_to_the_option() {
     assert_eq!(24, ws.book.get_col_size(2).unwrap());
     assert_eq!(Some("Column B is empty, reset to 24".to_owned()), last_message(&ws));
 }
+
+#[test]
+fn test_wide_column_is_drawn_clipped_and_cursor_stays_visible() {
+    let mut ws = new_workspace();
+    run(&mut ws, script().chars("ihello").enter());
+    cmd_line(&mut ws, "col-width 255");
+    let rows = draw_lines(&mut ws, 40, 12);
+    assert_eq!(
+        Some("Column is wider than the screen, drawn clipped".to_string()),
+        message_text(&ws)
+    );
+    assert!(rows.iter().any(|r| r.contains("hello")), "{rows:#?}");
+    assert_eq!(255, ws.book.get_col_size(1).unwrap(), "saved width unchanged");
+    // Moving on to the next column keeps it on screen too.
+    run(&mut ws, script().char('l'));
+    let rows = draw_lines(&mut ws, 40, 12);
+    assert!(rows.iter().any(|r| r.contains('B')), "{rows:#?}");
+}
+
+#[test]
+fn test_wide_column_next_to_frozen_column_still_fits() {
+    let mut ws = new_workspace();
+    cmd_line(&mut ws, "freeze 0 1");
+    run(&mut ws, script().char('l'));
+    cmd_line(&mut ws, "col-width 255");
+    let rows = draw_lines(&mut ws, 40, 12);
+    assert!(rows.iter().any(|r| r.contains('A')) && rows.iter().any(|r| r.contains('B')), "{rows:#?}");
+}
+
+#[test]
+fn test_ctrl_l_stops_at_255_and_ctrl_h_at_1() {
+    let mut ws = new_workspace();
+    cmd_line(&mut ws, "col-width 254");
+    run(&mut ws, script().ctrl('l').ctrl('l').ctrl('l'));
+    assert_eq!(255, ws.book.get_col_size(1).unwrap());
+    cmd_line(&mut ws, "col-width 1");
+    run(&mut ws, script().ctrl('h'));
+    assert_eq!(1, ws.book.get_col_size(1).unwrap());
+}

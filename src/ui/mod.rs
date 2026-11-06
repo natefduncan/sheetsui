@@ -1465,8 +1465,10 @@ impl<'ws> Workspace<'ws> {
                         row: _,
                         col,
                     } = &ws.book.location;
-                    ws.book
-                        .set_col_size(*col, ws.book.get_col_size(*col)? + 1)?;
+                    let size = ws.book.get_col_size(*col)?;
+                    if size < 255 {
+                        ws.book.set_col_size(*col, size + 1)?;
+                    }
                     Ok(())
                 })?;
             }

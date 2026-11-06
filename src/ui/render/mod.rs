@@ -79,6 +79,16 @@ impl<'ws> Workspace<'ws> {
                 .block(table_block);
                 StatefulWidget::render(viewport, rect, buf, &mut ws.state.viewport_state);
                 let vs = &mut ws.state.viewport_state;
+                if !vs.col_clipped {
+                    vs.col_clip_reported = false;
+                } else if !vs.col_clip_reported {
+                    vs.col_clip_reported = true;
+                    ws.set_message(
+                        MessageLevel::Info,
+                        "Column is wider than the screen, drawn clipped".to_string(),
+                    );
+                }
+                let vs = &mut ws.state.viewport_state;
                 if !vs.freeze_clipped {
                     vs.freeze_clip_reported = false;
                 } else if !vs.freeze_clip_reported {
