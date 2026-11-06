@@ -6536,3 +6536,71 @@ fn test_clear_style_cols_and_rows_cmds() {
     run_command(&mut ws, "clear-style-cols 0");
     assert_eq!(super::MessageLevel::Error, ws.state.message.as_ref().unwrap().level);
 }
+
+#[test]
+fn test_alt_toggle_keys_style_cursor_cell() {
+    let cases = [
+        ('b', StyleFlag::Bold, "Bold: 1 cell", "Not bold: 1 cell"),
+        ('i', StyleFlag::Italic, "Italic: 1 cell", "Not italic: 1 cell"),
+        ('u', StyleFlag::Underline, "Underline: 1 cell", "Not underline: 1 cell"),
+        ('s', StyleFlag::Strike, "Strike: 1 cell", "Not strike: 1 cell"),
+    ];
+    for (key, flag, on, off) in cases {
+        let mut ws = new_workspace();
+        script().alt(key).run(&mut ws).expect("script");
+        assert!(has_style(&ws, 1, 1, flag), "<A-{key}>");
+        assert!(!has_style(&ws, 2, 1, flag));
+        assert_eq!(Some(on.to_owned()), last_message(&ws));
+        script().alt(key).run(&mut ws).expect("script");
+        assert!(!has_style(&ws, 1, 1, flag), "<A-{key}> again");
+        assert_eq!(Some(off.to_owned()), last_message(&ws));
+    }
+}
+
+#[test]
+fn test_alt_alignment_keys_set_and_do_not_toggle() {
+    use ironcalc::base::types::HorizontalAlignment as H;
+    let mut ws = new_workspace();
+    script().alt('e').run(&mut ws).expect("script");
+    assert_eq!(Some(H::Center), halign_of(&ws, 1, 1));
+    script().alt('e').run(&mut ws).expect("script");
+    assert_eq!(Some(H::Center), halign_of(&ws, 1, 1));
+    script().alt('l').run(&mut ws).expect("script");
+    assert_eq!(Some(H::Left), halign_of(&ws, 1, 1));
+    script().alt(';').run(&mut ws).expect("script");
+    assert_eq!(Some(H::Right), halign_of(&ws, 1, 1));
+    assert_eq!(Some("Align right: 1 cell".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_alt_style_keys_in_range_select_one_undo() {
+    let mut ws = new_workspace();
+    script().char('v').chars("jl").alt('b').run(&mut ws).expect("script");
+    for (r, c) in [(1, 1), (1, 2), (2, 1), (2, 2)] {
+        assert!(has_style(&ws, r, c, StyleFlag::Bold), "{r}:{c}");
+    }
+    assert!(!has_style(&ws, 3, 3, StyleFlag::Bold));
+    assert_eq!(Some("Bold: 4 cells".to_owned()), last_message(&ws));
+    script().alt('e').run(&mut ws).expect("script");
+    assert_eq!(Some(ironcalc::base::types::HorizontalAlignment::Center), halign_of(&ws, 2, 2));
+    run_command(&mut ws, "undo");
+    assert_ne!(Some(ironcalc::base::types::HorizontalAlignment::Center), halign_of(&ws, 2, 2));
+    assert!(has_style(&ws, 2, 2, StyleFlag::Bold));
+}
+
+#[test]
+fn test_alt_style_keys_remap_and_help() {
+    let mut ws = new_workspace();
+    type_command(&mut ws, "nunmap <A-b>");
+    script().alt('b').run(&mut ws).expect("script");
+    assert!(!has_style(&ws, 1, 1, StyleFlag::Bold));
+    type_command(&mut ws, "nnoremap Q <A-i>");
+    script().char('Q').run(&mut ws).expect("script");
+    assert!(has_style(&ws, 1, 1, StyleFlag::Italic));
+    let mut ws = new_workspace();
+    script().alt('h').run(&mut ws).expect("script");
+    let help = popup_text(&ws);
+    for k in ["<A-b>", "<A-i>", "<A-u>", "<A-s>", "<A-l>", "<A-e>", "<A-;>"] {
+        assert!(help.contains(k), "{k} missing from help");
+    }
+}

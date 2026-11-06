@@ -53,6 +53,8 @@ will clear the numeric prefix if you want to cancel it.
 
 `<A-1>` to `<A-6>` and `<A-0>` format the cursor cell as number, time, date, currency, percent, scientific and general. `<A-.>` adds a decimal place and `<A-,>` removes one. `:format`, `:format-cols`, `:format-rows` and `:decimals` do the same with more choices. See [Number formats](./command.md#number-formats).
 
+`<A-b>`, `<A-i>`, `<A-u>` and `<A-s>` toggle bold, italic, underline and strikethrough on the cursor cell. `<A-l>`, `<A-e>` and `<A-;>` align it left, center and right; they set the alignment and do not toggle it, and `:align general` clears it. See [`style`](./command.md).
+
 ## Undo and Redo
 
 {{keys:undo}}

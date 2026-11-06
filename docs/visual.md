@@ -37,3 +37,5 @@ discontinuous ranges still needs the interaction interface to be
 determined.</aside>
 
 `<A-1>` to `<A-6>` and `<A-0>` set the number format of the selected cells (number, time, date, currency, percent, scientific, general), and `<A-.>` and `<A-,>` add and remove a decimal place. `:format` and `:decimals` apply to exactly the selected cells, and `:format-cols` and `:format-rows` to every column or row the selection touches. See [Number formats](./command.md#number-formats).
+
+`<A-b>`, `<A-i>`, `<A-u>` and `<A-s>` toggle bold, italic, underline and strikethrough on the selected cells, decided by the first selected cell so the selection ends up uniform. `<A-l>`, `<A-e>` and `<A-;>` align the selection left, center and right. Each key is one undo step. `:style-cols` and `:style-rows` cover whole columns and rows.

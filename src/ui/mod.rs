@@ -1163,6 +1163,13 @@ impl<'ws> Workspace<'ws> {
             RangeHandler::FormatGeneral => self.format_cells(Some("general")),
             RangeHandler::DecimalsMore => self.change_decimals(book::DecimalsChange::Add(1)),
             RangeHandler::DecimalsLess => self.change_decimals(book::DecimalsChange::Add(-1)),
+            RangeHandler::StyleBold => self.style_cells("bold"),
+            RangeHandler::StyleItalic => self.style_cells("italic"),
+            RangeHandler::StyleUnderline => self.style_cells("underline"),
+            RangeHandler::StyleStrike => self.style_cells("strike"),
+            RangeHandler::AlignLeft => self.style_cells("left"),
+            RangeHandler::AlignCenter => self.style_cells("center"),
+            RangeHandler::AlignRight => self.style_cells("right"),
             RangeHandler::Help => {
                 self.enter_dialog_mode(self.render_help_text());
             }
@@ -1481,6 +1488,13 @@ impl<'ws> Workspace<'ws> {
             NavHandler::FormatGeneral => self.format_cells(Some("general")),
             NavHandler::DecimalsMore => self.change_decimals(book::DecimalsChange::Add(1)),
             NavHandler::DecimalsLess => self.change_decimals(book::DecimalsChange::Add(-1)),
+            NavHandler::StyleBold => self.style_cells("bold"),
+            NavHandler::StyleItalic => self.style_cells("italic"),
+            NavHandler::StyleUnderline => self.style_cells("underline"),
+            NavHandler::StyleStrike => self.style_cells("strike"),
+            NavHandler::AlignLeft => self.style_cells("left"),
+            NavHandler::AlignCenter => self.style_cells("center"),
+            NavHandler::AlignRight => self.style_cells("right"),
             NavHandler::Help => {
                 self.enter_dialog_mode(self.render_help_text());
             }

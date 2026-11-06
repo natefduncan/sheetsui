@@ -104,6 +104,8 @@ Shift together on a letter, `<C-S-x>`, cannot be mapped: most terminals do
 not send it. The built-in copy keys use it where a terminal does, and it
 shows in the help as `<C-S-c>`.
 
+The text style keys are Alt too, because `<C-i>` is Tab and Ctrl+Shift cannot be sent: `<A-b>` bold, `<A-i>` italic, `<A-u>` underline and `<A-s>` strikethrough toggle, and `<A-l>`, `<A-e>` and `<A-;>` align left, center and right.
+
 That is why the number format keys are not Excel's own. Excel uses
 Ctrl+Shift with 1 to 6 and a terminal cannot send that, so the keys here are
 Alt and the same digit: `<A-4>` is currency where Excel has Ctrl+Shift+4.
