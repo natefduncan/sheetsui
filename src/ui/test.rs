@@ -1091,7 +1091,7 @@ fn test_init_config_clears_earlier_mappings() {
     let dir = temp_config_dir("keys-reset");
     let mut ws = new_workspace();
     map_nav(&mut ws, "z", "jj");
-    ws.init_config_from(Some(dir));
+    ws.init_config_from(None, Some(dir));
     assert!(ws.state.keymap.nav.is_empty());
 }
 
@@ -1100,7 +1100,7 @@ fn test_init_config_set_lines_start_the_session_with_those_options() {
     let dir = temp_config_dir("config-set");
     std::fs::write(dir.join("config"), "set ic scs\nset searchin=raw\n").unwrap();
     let mut ws = new_workspace();
-    ws.init_config_from(Some(dir));
+    ws.init_config_from(None, Some(dir));
     assert_eq!(None, message_text(&ws));
     assert!(ws.state.options.ignorecase());
     assert!(ws.state.options.smartcase());
@@ -1114,7 +1114,7 @@ fn test_config_mapping_loses_to_a_keys_mapping_for_the_same_keys() {
     std::fs::write(dir.join("config"), "nnoremap <Space> jj\nnnoremap a l\n").unwrap();
     std::fs::write(dir.join("keys"), "nnoremap <Space> jjj\n").unwrap();
     let mut ws = new_workspace();
-    ws.init_config_from(Some(dir.clone()));
+    ws.init_config_from(None, Some(dir.clone()));
     ws.init_keys_from(None, Some(dir));
     assert_eq!(2, ws.state.keymap.nav.mappings().len());
     let row = ws.book.location.row;
@@ -1131,7 +1131,7 @@ fn test_config_warnings_are_counted_and_listed_by_nmap() {
     std::fs::write(dir.join("config"), "write x\nset foo\nset ic\n").unwrap();
     std::fs::write(dir.join("keys"), "nnoremap 1 j\n").unwrap();
     let mut ws = new_workspace();
-    ws.init_config_from(Some(dir.clone()));
+    ws.init_config_from(None, Some(dir.clone()));
     assert!(ws.state.options.ignorecase(), "later lines still run");
     assert_eq!(
         Some("keys: 2 warnings (:nmap to list)".to_owned()),
@@ -1154,7 +1154,7 @@ fn test_config_with_theme_or_unrelated_lines_still_loads_the_theme() {
     let dir = temp_config_dir("config-theme");
     std::fs::write(dir.join("config"), "other 1\ntheme light\ntheme terminal\n").unwrap();
     let mut ws = new_workspace();
-    ws.init_config_from(Some(dir.clone()));
+    ws.init_config_from(None, Some(dir.clone()));
     ws.init_theme_from(None, Some(dir));
     assert_eq!("terminal", ws.state.theme.name);
     assert_eq!(1, ws.state.keymap.warnings.len());
@@ -3266,7 +3266,7 @@ fn test_init_theme_flag_beats_config_and_bad_name_falls_back() {
     let dir = temp_config_dir("init");
     std::fs::write(dir.join("config"), "theme terminal\n").unwrap();
     let mut ws = new_workspace();
-    ws.init_config_from(Some(dir.clone()));
+    ws.init_config_from(None, Some(dir.clone()));
     ws.init_theme_from(None, Some(dir.clone()));
     assert_eq!("terminal", ws.state.theme.name);
     ws.init_theme_from(Some("light"), Some(dir.clone()));
@@ -5499,4 +5499,32 @@ fn test_fill_series_cmd_uses_cursor_or_selection_as_seeds() {
     let mut ws = sort_workspace(&[&["1", "2"]]);
     run_command(&mut ws, "fill-series down");
     assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+}
+
+#[test]
+fn test_config_flag_file_and_keys_flag_both_load() {
+    let dir = temp_config_dir("config-flag");
+    std::fs::write(dir.join("config"), "set ic\n").unwrap();
+    let cfg = dir.join("mine");
+    std::fs::write(&cfg, "set scs\nnnoremap a l\n").unwrap();
+    let keys = dir.join("mykeys");
+    std::fs::write(&keys, "nnoremap b h\n").unwrap();
+    let mut ws = new_workspace();
+    ws.init_config_from(Some(&cfg), Some(dir.clone()));
+    ws.init_keys_from(Some(&keys), Some(dir.clone()));
+    assert!(ws.state.options.smartcase());
+    assert!(!ws.state.options.ignorecase());
+    assert_eq!(2, ws.state.keymap.nav.mappings().len());
+    assert_eq!(None, message_text(&ws));
+}
+
+#[test]
+fn test_missing_config_flag_file_is_counted_as_a_warning() {
+    let dir = temp_config_dir("config-flag-missing");
+    let mut ws = new_workspace();
+    ws.init_config_from(Some(&dir.join("nope")), Some(dir));
+    assert_eq!(
+        Some("keys: 1 warning (:nmap to list)".to_owned()),
+        message_text(&ws)
+    );
 }

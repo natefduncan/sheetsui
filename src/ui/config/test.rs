@@ -87,7 +87,7 @@ fn test_load_file_reads_config_in_the_dir() {
     std::fs::write(dir.join("config"), "set ic\n").unwrap();
     let mut options = Options::default();
     let mut keymap = KeyMap::default();
-    let loaded = load_file(Some(&dir), &mut options, &mut keymap);
+    let loaded = load_file(None, Some(&dir), &mut options, &mut keymap);
     assert!(options.ignorecase());
     assert_eq!(Some(dir.join("config")), loaded.path);
     assert!(loaded.warnings.is_empty());
@@ -98,8 +98,8 @@ fn test_missing_default_file_is_silent_and_no_dir_is_too() {
     let dir = dir("missing");
     let mut options = Options::default();
     let mut keymap = KeyMap::default();
-    assert_eq!(Loaded::default(), load_file(Some(&dir), &mut options, &mut keymap));
-    assert_eq!(Loaded::default(), load_file(None, &mut options, &mut keymap));
+    assert_eq!(Loaded::default(), load_file(None, Some(&dir), &mut options, &mut keymap));
+    assert_eq!(Loaded::default(), load_file(None, None, &mut options, &mut keymap));
 }
 
 #[test]
@@ -108,7 +108,7 @@ fn test_unreadable_config_is_a_warning() {
     std::fs::create_dir(dir.join("config")).unwrap();
     let mut options = Options::default();
     let mut keymap = KeyMap::default();
-    let loaded = load_file(Some(&dir), &mut options, &mut keymap);
+    let loaded = load_file(None, Some(&dir), &mut options, &mut keymap);
     assert_eq!(1, loaded.warnings.len());
     assert!(loaded.warnings[0].msg.contains("cannot read"));
 }
@@ -139,4 +139,41 @@ fn test_bare_theme_line_warns_and_keeps_the_earlier_theme() {
     );
     assert_eq!(vec![2], warnings.iter().map(|w| w.line).collect::<Vec<_>>());
     assert_eq!(Some("light".to_owned()), theme);
+}
+
+#[test]
+fn test_flag_file_is_loaded_instead_of_the_default() {
+    let dir = dir("flag");
+    std::fs::write(dir.join("config"), "set ic\n").unwrap();
+    let other = dir.join("other");
+    std::fs::write(&other, "set scs\n").unwrap();
+    let mut options = Options::default();
+    let mut keymap = KeyMap::default();
+    let loaded = load_file(Some(&other), Some(&dir), &mut options, &mut keymap);
+    assert!(options.smartcase());
+    assert!(!options.ignorecase());
+    assert_eq!(Some(other), loaded.path);
+    assert!(loaded.warnings.is_empty());
+}
+
+#[test]
+fn test_missing_flag_file_is_a_warning() {
+    let dir = dir("flag-missing");
+    let missing = dir.join("nope");
+    let mut options = Options::default();
+    let mut keymap = KeyMap::default();
+    let loaded = load_file(Some(&missing), Some(&dir), &mut options, &mut keymap);
+    assert_eq!(1, loaded.warnings.len());
+    assert!(loaded.warnings[0].msg.contains("cannot read"));
+}
+
+#[test]
+fn test_flag_file_works_without_a_config_dir() {
+    let dir = dir("flag-nodir");
+    let file = dir.join("c");
+    std::fs::write(&file, "set ic\n").unwrap();
+    let mut options = Options::default();
+    let loaded = load_file(Some(&file), None, &mut options, &mut KeyMap::default());
+    assert!(options.ignorecase());
+    assert!(loaded.warnings.is_empty());
 }

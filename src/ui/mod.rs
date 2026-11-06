@@ -2219,20 +2219,21 @@ impl<'ws> Workspace<'ws> {
         self.report_key_warnings();
     }
 
-    /// Loads the `config` file from the config directory: `set` lines into the
+    /// Loads the `--config` file, else `config` from the config directory: `set` lines into the
     /// options and mappings into the key map. Starts the key map from the
     /// built-ins, so call it before `init_keys`. Never fails: a problem is a
     /// warning, counted on the message line and listed by `:nmap`.
-    pub fn init_config(&mut self) {
-        self.init_config_from(lookup::config_dir());
+    pub fn init_config(&mut self, flag: Option<&Path>) {
+        self.init_config_from(flag, lookup::config_dir());
     }
 
-    fn init_config_from(&mut self, config_dir: Option<PathBuf>) {
+    fn init_config_from(&mut self, flag: Option<&Path>, config_dir: Option<PathBuf>) {
         self.state.keymap.nav = Default::default();
         self.state.keymap.range = Default::default();
         self.state.keymap.warnings.clear();
         self.state.keymap.loaded_from = None;
         let loaded = config::load_file(
+            flag,
             config_dir.as_deref(),
             &mut self.state.options,
             &mut self.state.keymap,

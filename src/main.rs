@@ -24,6 +24,10 @@ pub struct Args {
     /// A theme name or a path to a theme file.
     #[arg(long)]
     theme: Option<String>,
+    /// A config file of startup commands, instead of the one in the config
+    /// directory.
+    #[arg(long)]
+    config: Option<PathBuf>,
     /// A keys file of `nnoremap` and `nunmap` lines, instead of the one in the
     /// config directory.
     #[arg(long)]
@@ -54,7 +58,7 @@ fn run(terminal: &mut ratatui::DefaultTerminal, args: Args) -> anyhow::Result<Ex
     if let Some(path) = ui::CommandHistory::search_path() {
         ws.state.search_history.use_file(&path);
     }
-    ws.init_config();
+    ws.init_config(args.config.as_deref());
     ws.init_theme(args.theme.as_deref());
     ws.init_keys(args.keys.as_deref());
     let mut read_func: ReadFn = if let Some(log_path) = args.log_input {

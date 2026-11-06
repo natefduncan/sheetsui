@@ -77,17 +77,20 @@ pub struct Loaded {
     pub warnings: Vec<Warning>,
 }
 
-/// Loads `config` from `config_dir`. A missing file is normal and says
-/// nothing; any other read error is a warning.
+/// Loads the file named by `flag`, else `config` from `config_dir`. A missing
+/// default file is normal and says nothing; a missing flag file, or any other
+/// read error, is a warning.
 pub fn load_file(
+    flag: Option<&Path>,
     config_dir: Option<&Path>,
     options: &mut Options,
     keymap: &mut KeyMap,
 ) -> Loaded {
-    let Some(dir) = config_dir else {
-        return Loaded::default();
+    let path = match (flag, config_dir) {
+        (Some(path), _) => path.to_owned(),
+        (None, Some(dir)) => dir.join("config"),
+        (None, None) => return Loaded::default(),
     };
-    let path = dir.join("config");
     let mut theme = None;
     match std::fs::read_to_string(&path) {
         Ok(text) => {
@@ -98,7 +101,7 @@ pub fn load_file(
                 warnings,
             }
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Loaded::default(),
+        Err(e) if flag.is_none() && e.kind() == std::io::ErrorKind::NotFound => Loaded::default(),
         Err(e) => {
             let msg = format!("cannot read {}: {e}", path.display());
             let source = source_name(&path);
