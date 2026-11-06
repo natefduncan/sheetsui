@@ -2636,3 +2636,52 @@ fn test_book_change_decimals_refusal_changes_nothing() {
     assert_eq!(err.to_string(), "Cannot change decimals of yyyy-mm-dd");
     assert_eq!(book.get_number_format(&phase2_addr(1, 2)).as_deref(), Some("0.00"));
 }
+
+#[test]
+fn test_style_paths_accepted_by_ironcalc_for_text_styles() {
+    let mut book = csv_book("a\n");
+    let area = Area { sheet: 0, row: 1, column: 1, width: 1, height: 1 };
+    let style = |b: &Book| b.get_cell_style(&phase2_addr(1, 1)).expect("style");
+    book.set_cell_style(
+        &[
+            ("font.u", "true"),
+            ("font.strike", "true"),
+            ("alignment.horizontal", "center"),
+            ("alignment.wrap_text", "true"),
+            ("alignment.vertical", "top"),
+        ],
+        &area,
+    )
+    .expect("set");
+    let s = style(&book);
+    assert!(s.font.u && s.font.strike);
+    let a = s.alignment.expect("alignment");
+    assert_eq!(ironcalc::base::types::HorizontalAlignment::Center, a.horizontal);
+    // `general` is stored as General, keeping wrap and vertical.
+    book.set_cell_style(&[("alignment.horizontal", "general")], &area).expect("general");
+    let a = style(&book).alignment.expect("alignment kept");
+    assert_eq!(ironcalc::base::types::HorizontalAlignment::General, a.horizontal);
+    assert!(a.wrap_text);
+    // `alignment` with an empty string drops the whole struct.
+    book.set_cell_style(&[("alignment", "")], &area).expect("clear");
+    assert!(style(&book).alignment.is_none());
+    // Only "true" and "false" are booleans.
+    assert!(book.set_cell_style(&[("font.u", "yes")], &area).is_err());
+    book.set_cell_style(&[("font.u", "false"), ("font.strike", "false")], &area).expect("off");
+    assert!(!style(&book).font.u);
+}
+
+#[test]
+fn test_full_column_style_merges_one_path_into_cells_with_a_style() {
+    let mut book = csv_book("a\nb\n");
+    let cell = Area { sheet: 0, row: 1, column: 1, width: 1, height: 1 };
+    book.set_cell_style(&[("fill.color", "#ff0000"), ("num_fmt", "0.00")], &cell).expect("fill");
+    book.set_col_style(&[("font.b", "true")], 0, 1).expect("col bold");
+    let s = book.get_cell_style(&phase2_addr(1, 1)).expect("style");
+    assert!(s.font.b);
+    assert_eq!("0.00", s.num_fmt);
+    assert_ne!(ironcalc::base::types::Color::None, s.fill.color);
+    // A cell with no style of its own gets the column's.
+    let s = book.get_cell_style(&phase2_addr(2, 1)).expect("style");
+    assert!(s.font.b);
+}

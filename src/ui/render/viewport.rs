@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use anyhow::Result;
+use ironcalc::base::types::HorizontalAlignment;
 use regex::Regex;
 use ratatui::{
     buffer::Buffer,
@@ -271,7 +272,22 @@ impl<'ws> Viewport<'ws> {
                         })
                         .unwrap();
                     let is_match = matches.contains(&(ri, *ci));
-                    self.compute_cell_style(ri, *ci, is_match, Cell::new(Text::raw(content)))
+                    let addr = Address {
+                        row: ri,
+                        col: *ci,
+                        sheet: self.book.location.sheet,
+                    };
+                    let line = Line::raw(content);
+                    let line = match self.book.get_cell_style(&addr).map(|s| s.alignment) {
+                        Some(Some(a)) => match a.horizontal {
+                            HorizontalAlignment::Left => line.left_aligned(),
+                            HorizontalAlignment::Center => line.centered(),
+                            HorizontalAlignment::Right => line.right_aligned(),
+                            _ => line,
+                        },
+                        _ => line,
+                    };
+                    self.compute_cell_style(ri, *ci, is_match, Cell::new(Text::from(line)))
                 },
             ));
             rows.push(Row::new(with_vline(cells, "│")));
@@ -361,6 +377,8 @@ impl<'ws> Viewport<'ws> {
             cell = self.compute_cell_colors(&style, ri, ci, is_match, cell);
             cell = if style.font.b { cell.bold() } else { cell };
             cell = if style.font.i { cell.italic() } else { cell };
+            cell = if style.font.u { cell.underlined() } else { cell };
+            cell = if style.font.strike { cell.crossed_out() } else { cell };
         }
         cell
     }

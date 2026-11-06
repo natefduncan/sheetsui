@@ -766,3 +766,157 @@ fn test_range_select_highlights_both_sides_of_the_freeze() {
     assert_eq!(want, buf[(6, 11)].bg, "scrolling row 50 not highlighted");
     assert_ne!(want, buf[(26, 5)].bg, "a cell outside the range was highlighted");
 }
+
+/// Draws `book` with the default theme and the cursor at A1 (or `cursor`),
+/// returning the buffer. Column `c` starts at x = 5 + width * (c - 1).
+fn draw_styled(
+    book: &Book,
+    range: Option<&crate::ui::RangeSelection>,
+    cursor: Address,
+    search: Option<&regex::Regex>,
+) -> ratatui::buffer::Buffer {
+    use ratatui::{backend::TestBackend, widgets::StatefulWidget, Terminal};
+
+    use crate::{book::search::SearchIn, ui::theme::Theme};
+
+    let theme = Theme::default();
+    let width = book.get_col_size(1).expect("col size") as u16;
+    let mut viewport = Viewport::new(book, range, &theme).with_selected(cursor);
+    if let Some(re) = search {
+        viewport = viewport.with_search(Some((re, SearchIn::Value)));
+    }
+    let mut term = Terminal::new(TestBackend::new(5 + width * 4, 8)).expect("terminal");
+    term.draw(|f| {
+        let mut state = ViewportState::default();
+        viewport.render(f.area(), f.buffer_mut(), &mut state);
+    })
+    .expect("draw");
+    term.backend().buffer().clone()
+}
+
+fn styled_book() -> Book {
+    let mut book = Book::from_model(
+        Model::new_empty("test", "en", "America/New_York", "en").expect("Failed to make model"),
+    );
+    let at = |row, col| Address { sheet: 0, row, col };
+    for (row, text) in [(2, "abc"), (3, "abc"), (4, "abc")] {
+        book.update_cell(&at(row, 1), text).expect("set cell");
+    }
+    book.evaluate();
+    book
+}
+
+fn style_cell(book: &mut Book, row: i32, col: i32, style: &[(&str, &str)]) {
+    let area = ironcalc::base::expressions::types::Area {
+        sheet: 0,
+        row,
+        column: col,
+        width: 1,
+        height: 1,
+    };
+    book.set_cell_style(style, &area).expect("style");
+}
+
+#[test]
+fn test_underline_and_strikethrough_are_drawn_from_file_styles() {
+    use ratatui::style::Modifier;
+
+    let mut book = styled_book();
+    style_cell(&mut book, 2, 1, &[("font.u", "true")]);
+    style_cell(&mut book, 3, 1, &[("font.strike", "true")]);
+    style_cell(&mut book, 4, 1, &[("font.u", "true"), ("font.strike", "true"), ("font.b", "true")]);
+    let at = Address { sheet: 0, row: 1, col: 3 };
+    let buf = draw_styled(&book, None, at, None);
+    let (x, y2) = find_text(&buf, "abc");
+    let m = |y: u16| buf[(x, y)].modifier;
+    assert!(m(y2).contains(Modifier::UNDERLINED));
+    assert!(!m(y2).contains(Modifier::CROSSED_OUT));
+    assert!(m(y2 + 1).contains(Modifier::CROSSED_OUT));
+    assert!(!m(y2 + 1).contains(Modifier::UNDERLINED));
+    assert!(m(y2 + 2).contains(Modifier::UNDERLINED | Modifier::CROSSED_OUT | Modifier::BOLD));
+}
+
+#[test]
+fn test_horizontal_alignment_places_the_text_in_its_column() {
+    let mut book = styled_book();
+    style_cell(&mut book, 2, 1, &[("alignment.horizontal", "left")]);
+    style_cell(&mut book, 3, 1, &[("alignment.horizontal", "center")]);
+    style_cell(&mut book, 4, 1, &[("alignment.horizontal", "right")]);
+    let width = book.get_col_size(1).expect("col size") as u16;
+    let buf = draw_styled(&book, None, Address { sheet: 0, row: 1, col: 3 }, None);
+    let (x0, y2) = find_text(&buf, "abc");
+    // Left starts at the column; center and right start further in.
+    let left = (x0..x0 + width).find(|x| buf[(*x, y2)].symbol() == "a").unwrap() - x0;
+    let center = (x0..x0 + width).find(|x| buf[(*x, y2 + 1)].symbol() == "a").unwrap() - x0;
+    let right = (x0..x0 + width).find(|x| buf[(*x, y2 + 2)].symbol() == "a").unwrap() - x0;
+    assert_eq!(0, left);
+    assert_eq!((width - 3) / 2, center);
+    assert_eq!(width - 3, right);
+}
+
+#[test]
+fn test_general_alignment_keeps_the_default_placement() {
+    let mut book = styled_book();
+    style_cell(&mut book, 2, 1, &[("alignment.horizontal", "general")]);
+    let buf = draw_styled(&book, None, Address { sheet: 0, row: 1, col: 3 }, None);
+    let (x0, _) = find_text(&buf, "abc");
+    assert_eq!(5, x0);
+}
+
+#[test]
+fn test_wide_characters_count_as_two_when_aligned() {
+    let mut book = styled_book();
+    let at = Address { sheet: 0, row: 2, col: 1 };
+    book.update_cell(&at, "日本").expect("set");
+    book.evaluate();
+    style_cell(&mut book, 2, 1, &[("alignment.horizontal", "right")]);
+    let width = book.get_col_size(1).expect("col size") as u16;
+    let buf = draw_styled(&book, None, Address { sheet: 0, row: 1, col: 3 }, None);
+    let (x0, _) = find_text(&buf, "日");
+    // Four cells wide, so it starts four from the right edge.
+    assert_eq!(5 + width - 4, x0);
+}
+
+#[test]
+fn test_alignment_and_modifiers_keep_the_text_and_the_width() {
+    let mut book = styled_book();
+    let width = book.get_col_size(1).expect("col size");
+    style_cell(
+        &mut book,
+        2,
+        1,
+        &[("font.u", "true"), ("font.strike", "true"), ("alignment.horizontal", "left")],
+    );
+    assert_eq!(width, book.get_col_size(1).expect("col size"));
+    assert_eq!("abc", book.get_cell_addr_rendered(&Address { sheet: 0, row: 2, col: 1 }).unwrap());
+}
+
+#[test]
+fn test_cursor_selection_and_search_keep_the_modifiers() {
+    use ratatui::style::Modifier;
+
+    let mut book = styled_book();
+    style_cell(&mut book, 2, 1, &[("font.u", "true"), ("font.strike", "true"), ("alignment.horizontal", "right")]);
+    let all = Modifier::UNDERLINED | Modifier::CROSSED_OUT;
+    let width = book.get_col_size(1).expect("col size") as u16;
+    let x = 5 + width - 1; // the right edge: the "c" of "abc"
+    let find_y = |buf: &ratatui::buffer::Buffer| find_text(buf, "abc").1;
+
+    // Cursor on the cell.
+    let buf = draw_styled(&book, None, Address { sheet: 0, row: 2, col: 1 }, None);
+    assert!(buf[(x, find_y(&buf))].modifier.contains(all), "cursor");
+
+    // In a range selection.
+    let range = crate::ui::RangeSelection {
+        start: Some(Address { sheet: 0, row: 2, col: 1 }),
+        end: Some(Address { sheet: 0, row: 3, col: 1 }),
+        ..Default::default()
+    };
+    let buf = draw_styled(&book, Some(&range), Address { sheet: 0, row: 4, col: 1 }, None);
+    assert!(buf[(x, find_y(&buf))].modifier.contains(all), "selection");
+
+    // A search match.
+    let re = regex::Regex::new("abc").unwrap();
+    let buf = draw_styled(&book, None, Address { sheet: 0, row: 1, col: 3 }, Some(&re));
+    assert!(buf[(x, find_y(&buf))].modifier.contains(all), "search");
+}

@@ -182,6 +182,30 @@ None of these has been checked by running anything:
   configured; see `docs/keys.md`).
 - What typing, copy, paste and fill do to the style of the target (T14).
 
+## Facts checked (step 1)
+
+Read from ironcalc_base 0.8.3 and pinned by tests in `src/book/test.rs`.
+
+- **Full column or row over styled cells:** `update_range_style` merges one
+  path into each cell's current style (`update_style` on `get_style_for_cell`),
+  so `style-cols bold` keeps a cell's fill and number format. It touches the
+  column style, every cell with data, and every cell in a styled row. Empty
+  cells with no style of their own inherit the column style. T8 holds; no
+  need to read and write whole styles.
+- **Accepted values:** `font.u` and `font.strike` take exactly `"true"` or
+  `"false"`, like `font.b`; anything else is an error. `alignment.horizontal`
+  takes `left`, `center`, `right`, `general`, `justify`, `fill`,
+  `centerContinuous`, `distributed`. `general` is stored as
+  `HorizontalAlignment::General` and keeps wrap and vertical.
+- **`alignment` with an empty string** sets the whole alignment to `None`,
+  so wrap and vertical go too. T6 (`general`) therefore writes
+  `alignment.horizontal=general`, which leaves wrap and vertical alone; T7
+  (`clear-style`) writes `alignment=""`, which clears all three.
+- **Rendering alignment:** the table cell has no alignment of its own, but its
+  content is a ratatui `Line`, and a `Line` with an alignment places itself
+  in the cell, counting wide characters as 2. No padding by us. Only `left`,
+  `center` and `right` are drawn; other values draw as general.
+
 ## Decided questions
 
 - Right alignment is `<A-;>` (T10).
