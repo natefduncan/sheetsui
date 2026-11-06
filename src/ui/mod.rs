@@ -1032,6 +1032,10 @@ impl<'ws> Workspace<'ws> {
                 self.format_cells(arg);
                 Ok(None)
             }
+            Ok(Some(Cmd::Decimals(change))) => {
+                self.change_decimals(change);
+                Ok(None)
+            }
             Ok(Some(Cmd::FormatCols(count, fmt))) => {
                 self.format_span(true, count, fmt);
                 Ok(None)
@@ -1726,6 +1730,26 @@ impl<'ws> Workspace<'ws> {
                 let what = if cells == 1 { "1 cell".to_string() } else { format!("{cells} cells") };
                 let name = if preset.is_some() { arg.to_lowercase() } else { arg.to_string() };
                 self.set_message(MessageLevel::Info, format!("Format {name}: {what}"));
+            }
+            Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
+        }
+    }
+
+    /// `:decimals <+n|-n|n>`.
+    fn change_decimals(&mut self, change: book::DecimalsChange) {
+        if self.in_cell_edit_range_select() {
+            return;
+        }
+        let area = self.target_area();
+        match self.book.change_decimals(change, &area) {
+            Ok(_) => {
+                let cells = area.width * area.height;
+                let what = if cells == 1 { "1 cell".to_string() } else { format!("{cells} cells") };
+                let shown = match change {
+                    book::DecimalsChange::Add(n) => format!("{n:+}"),
+                    book::DecimalsChange::Set(n) => n.to_string(),
+                };
+                self.set_message(MessageLevel::Info, format!("Decimals {shown}: {what}"));
             }
             Err(e) => self.set_message(MessageLevel::Error, e.to_string()),
         }

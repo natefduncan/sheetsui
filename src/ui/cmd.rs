@@ -2,7 +2,7 @@
 use ironcalc::base::expressions::utils::{column_to_number, is_valid_column};
 use slice_utils::{Measured, Peekable, Seekable, Span, StrCursor};
 
-use crate::book::FillDirection;
+use crate::book::{DecimalsChange, FillDirection, MAX_DECIMALS};
 use crate::book::substitute::{is_delimiter, Scope};
 
 /// A parsed command entered in during command mode.
@@ -34,6 +34,8 @@ pub enum Cmd<'a> {
     /// `None` when not written.
     FormatCols(Option<usize>, &'a str),
     FormatRows(Option<usize>, &'a str),
+    /// `:decimals <+n|-n|n>`: add, remove or set decimal places.
+    Decimals(DecimalsChange),
     RenameSheet(Option<usize>, &'a str),
     NewSheet(Option<&'a str>),
     SelectSheet(&'a str),
@@ -175,6 +177,9 @@ pub fn parse<'cmd, 'i: 'cmd>(input: &'i str) -> Result<Option<Cmd<'cmd>>, &'stat
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_format_span(cursor.clone(), "format-rows")? {
+        return Ok(Some(cmd));
+    }
+    if let Some(cmd) = try_consume_decimals(cursor.clone())? {
         return Ok(Some(cmd));
     }
     if let Some(cmd) = try_consume_format(cursor.clone())? {
@@ -341,6 +346,37 @@ fn try_consume_format<'cmd, 'i: 'cmd>(
     // spaces and quotes.
     let arg = input.span(0..).trim();
     Ok(Some(Cmd::Format(if arg.is_empty() { None } else { Some(arg) })))
+}
+
+fn try_consume_decimals<'cmd, 'i: 'cmd>(
+    mut input: StrCursor<'i>,
+) -> Result<Option<Cmd<'cmd>>, &'static str> {
+    const LONG: &str = "decimals";
+    const USAGE: &str = "Usage: decimals <+n|-n|n>";
+    if !compare(input.clone(), LONG) {
+        return Ok(None);
+    }
+    input.seek(LONG.len());
+    if input.remaining() > 0 && !is_ws(&mut input) {
+        return Err(USAGE);
+    }
+    let arg = input.span(0..).trim();
+    let (sign, digits) = match arg.as_bytes().first() {
+        Some(b'+') => (1, &arg[1..]),
+        Some(b'-') => (-1, &arg[1..]),
+        _ => (0, arg),
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(USAGE);
+    }
+    let n: usize = digits.parse().map_err(|_| USAGE)?;
+    if n > MAX_DECIMALS {
+        return Err(USAGE);
+    }
+    Ok(Some(Cmd::Decimals(match sign {
+        0 => DecimalsChange::Set(n),
+        s => DecimalsChange::Add(s * n as i32),
+    })))
 }
 
 /// `format-cols` and `format-rows`: `[count] <preset|code>`. The count comes

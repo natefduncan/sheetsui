@@ -61,6 +61,78 @@ pub fn check_number_format(code: &str) -> Result<()> {
     Ok(())
 }
 
+/// How `:decimals` changes the decimal places of a number format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DecimalsChange {
+    /// `+n` or `-n`: add or remove places, stopping at 0 and at 15.
+    Add(i32),
+    /// `n`: exactly this many places.
+    Set(usize),
+}
+
+/// The most decimal places `:decimals` will make.
+pub const MAX_DECIMALS: usize = 15;
+
+/// A plain number format: an optional `$`, digit placeholders (`0`, `#`, `,`),
+/// an optional `.` with placeholders, and an optional `%`. `General` counts
+/// as `0`. This is the one definition of "plain" for `:decimals`.
+struct PlainNumberFormat<'a> {
+    prefix: &'a str,
+    int: &'a str,
+    decimals: &'a str,
+    suffix: &'a str,
+}
+
+impl<'a> PlainNumberFormat<'a> {
+    fn parse(code: &'a str) -> Option<Self> {
+        if code.eq_ignore_ascii_case("general") {
+            return Some(PlainNumberFormat { prefix: "", int: "0", decimals: "", suffix: "" });
+        }
+        let (prefix, rest) = match code.strip_prefix('$') {
+            Some(r) => ("$", r),
+            None => ("", code),
+        };
+        let (rest, suffix) = match rest.strip_suffix('%') {
+            Some(r) => (r, "%"),
+            None => (rest, ""),
+        };
+        let (int, decimals) = match rest.split_once('.') {
+            Some((i, d)) => (i, d),
+            None => (rest, ""),
+        };
+        let int_ok = int.bytes().all(|b| matches!(b, b'0' | b'#' | b','));
+        let dec_ok = decimals.bytes().all(|b| matches!(b, b'0' | b'#'));
+        if !int_ok || !dec_ok || (int.is_empty() && decimals.is_empty()) {
+            return None;
+        }
+        Some(PlainNumberFormat { prefix, int, decimals, suffix })
+    }
+
+    fn with_decimals(&self, change: DecimalsChange) -> String {
+        let old = self.decimals.len();
+        let new = match change {
+            DecimalsChange::Set(n) => n,
+            DecimalsChange::Add(d) => (old as i64 + d as i64).clamp(0, MAX_DECIMALS as i64) as usize,
+        };
+        let mut decimals: String = self.decimals.chars().take(new).collect();
+        while decimals.len() < new {
+            decimals.push('0');
+        }
+        let dot = if new > 0 { "." } else { "" };
+        format!("{}{}{dot}{decimals}{}", self.prefix, self.int, self.suffix)
+    }
+}
+
+/// The format code that `change` makes of `code`, or the error
+/// `Cannot change decimals of <code>` when `code` is not a plain number
+/// format.
+pub fn change_decimals(code: &str, change: DecimalsChange) -> Result<String> {
+    match PlainNumberFormat::parse(code) {
+        Some(plain) => Ok(plain.with_decimals(change)),
+        None => Err(anyhow!("Cannot change decimals of {code}")),
+    }
+}
+
 /// The file format a [`Book`] was loaded from or will be saved to.
 #[derive(Debug, Clone, PartialEq)]
 pub enum FileFormat {
@@ -929,6 +1001,22 @@ impl Book {
     pub fn set_number_format(&mut self, code: &str, area: &Area) -> Result<()> {
         check_number_format(code)?;
         self.set_cell_style(&[("num_fmt", code)], area)
+    }
+
+    /// Change the decimal places of `area` as one undo step. The new code is
+    /// computed once from the format of the area's first cell, so a mixed
+    /// area gets one format. Returns the code applied. A format that is not
+    /// plain is an error and changes nothing.
+    pub fn change_decimals(&mut self, change: DecimalsChange, area: &Area) -> Result<String> {
+        let first = Address {
+            sheet: area.sheet,
+            row: area.row as usize,
+            col: area.column as usize,
+        };
+        let code = self.get_number_format(&first).unwrap_or_else(|| "General".to_string());
+        let new = change_decimals(&code, change)?;
+        self.set_number_format(&new, area)?;
+        Ok(new)
     }
 
     /// Set the number format of `count` whole columns from `first` on the

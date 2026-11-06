@@ -5,7 +5,7 @@ use crate::ui::Address;
 use super::{
     shrink_freeze,
     search::{Direction, SearchIn},
-    check_number_format, number_format_preset, AutofitReport, Book, FileFormat, DEFAULT_COL_WIDTH, LAST_COLUMN, LAST_ROW,
+    change_decimals, check_number_format, number_format_preset, DecimalsChange, AutofitReport, Book, FileFormat, DEFAULT_COL_WIDTH, LAST_COLUMN, LAST_ROW,
 };
 use ironcalc::base::UserModel;
 
@@ -2578,4 +2578,61 @@ fn test_set_number_format_cols_rows_errors_change_nothing() {
     assert_eq!(book.get_number_format(&phase2_addr(1, 1)).as_deref(), Some("General"));
     book.set_number_format_cols(16_384, 1, "0").expect("last column");
     book.set_number_format_rows(1_048_576, 1, "0").expect("last row");
+}
+
+#[test]
+fn test_change_decimals_plain_formats() {
+    use DecimalsChange::{Add, Set};
+    let cases = [
+        ("General", Add(1), "0.0"),
+        ("General", Add(-1), "0"),
+        ("general", Add(2), "0.00"),
+        ("0.00", Add(1), "0.000"),
+        ("0.00", Add(-1), "0.0"),
+        ("0.00", Add(-5), "0"),
+        ("#,##0", Add(2), "#,##0.00"),
+        ("$#,##0.00", Add(-2), "$#,##0"),
+        ("0.00%", Add(1), "0.000%"),
+        ("0.00", Set(0), "0"),
+        ("0", Set(15), "0.000000000000000"),
+        ("0.00", Add(20), "0.000000000000000"),
+        ("#.##", Add(1), "#.##0"),
+    ];
+    for (code, change, want) in cases {
+        assert_eq!(change_decimals(code, change).expect(code), want, "{code} {change:?}");
+    }
+}
+
+#[test]
+fn test_change_decimals_refuses_other_formats() {
+    for code in ["yyyy-mm-dd", "hh:mm:ss", "0.00E+00", "0.00;[Red]0.00", "0.00 \"USD\"", "@", ""] {
+        let err = change_decimals(code, DecimalsChange::Add(1)).expect_err(code).to_string();
+        assert_eq!(err, format!("Cannot change decimals of {code}"));
+    }
+}
+
+#[test]
+fn test_book_change_decimals_mixed_area_uses_first_cell_one_undo() {
+    let mut book = Book::default();
+    book.set_number_format("0.00", &fmt_area(1, 1, 1, 1)).expect("format");
+    book.set_number_format("0.0%", &fmt_area(1, 2, 1, 1)).expect("format");
+    let area = fmt_area(1, 1, 2, 2);
+    assert_eq!(book.change_decimals(DecimalsChange::Add(1), &area).expect("decimals"), "0.000");
+    for (r, c) in [(1, 1), (1, 2), (2, 1), (2, 2)] {
+        assert_eq!(book.get_number_format(&phase2_addr(r, c)).as_deref(), Some("0.000"));
+    }
+    assert!(book.undo().expect("undo"));
+    assert_eq!(book.get_number_format(&phase2_addr(1, 1)).as_deref(), Some("0.00"));
+    assert_eq!(book.get_number_format(&phase2_addr(1, 2)).as_deref(), Some("0.0%"));
+    assert_eq!(book.get_number_format(&phase2_addr(2, 2)).as_deref(), Some("General"));
+}
+
+#[test]
+fn test_book_change_decimals_refusal_changes_nothing() {
+    let mut book = Book::default();
+    book.set_number_format("yyyy-mm-dd", &fmt_area(1, 1, 1, 1)).expect("format");
+    book.set_number_format("0.00", &fmt_area(1, 2, 1, 1)).expect("format");
+    let err = book.change_decimals(DecimalsChange::Add(1), &fmt_area(1, 1, 2, 1)).expect_err("date");
+    assert_eq!(err.to_string(), "Cannot change decimals of yyyy-mm-dd");
+    assert_eq!(book.get_number_format(&phase2_addr(1, 2)).as_deref(), Some("0.00"));
 }

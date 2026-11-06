@@ -5,6 +5,7 @@ use tui_prompts::State;
 use serial_test::serial;
 
 use crate::book;
+use crate::book::DecimalsChange;
 use crate::book::search::Direction;
 use ironcalc::base::types::Color;
 use crate::ui::cmd::parse_color;
@@ -6084,4 +6085,70 @@ fn test_format_rows_range_select_and_width_unchanged() {
     assert_eq!("$#,##0.00", fmt_of(&ws, 3, 1));
     assert_eq!("General", fmt_of(&ws, 4, 1));
     assert_eq!(width, ws.book.get_col_size(1).unwrap());
+}
+
+#[test]
+fn test_decimals_cmd_parse() {
+    assert_eq!(Cmd::Decimals(DecimalsChange::Add(1)), parse("decimals +1").unwrap().unwrap());
+    assert_eq!(Cmd::Decimals(DecimalsChange::Add(-2)), parse("decimals -2").unwrap().unwrap());
+    assert_eq!(Cmd::Decimals(DecimalsChange::Set(3)), parse("decimals 3").unwrap().unwrap());
+    assert_eq!(Cmd::Decimals(DecimalsChange::Set(0)), parse("decimals 0").unwrap().unwrap());
+    let usage = Err("Usage: decimals <+n|-n|n>");
+    for bad in ["decimals", "decimals x", "decimals +", "decimals 1.5", "decimals 16", "decimals +16", "decimals -16", "decimals 1 2", "decimalsx"] {
+        assert_eq!(usage, parse(bad), "{bad}");
+    }
+}
+
+#[test]
+fn test_decimals_cmd_cursor_cell_and_message() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "decimals +1");
+    assert_eq!("0.0", fmt_of(&ws, 1, 1));
+    assert_eq!("General", fmt_of(&ws, 1, 2));
+    assert_eq!(Some("Decimals +1: 1 cell".to_owned()), last_message(&ws));
+    run_command(&mut ws, "decimals 3");
+    assert_eq!("0.000", fmt_of(&ws, 1, 1));
+    assert_eq!(Some("Decimals 3: 1 cell".to_owned()), last_message(&ws));
+    run_command(&mut ws, "decimals -1");
+    assert_eq!("0.00", fmt_of(&ws, 1, 1));
+    assert_eq!(Some("Decimals -1: 1 cell".to_owned()), last_message(&ws));
+}
+
+#[test]
+fn test_decimals_cmd_range_select_mixed_one_format_one_undo() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "format percent");
+    script().char('v').chars("jjll").char(':').chars("decimals +1").enter()
+        .run(&mut ws).expect("script");
+    for r in 1..=3 {
+        for c in 1..=3 {
+            assert_eq!("0.000%", fmt_of(&ws, r, c), "{r}:{c}");
+        }
+    }
+    assert_eq!("General", fmt_of(&ws, 4, 4));
+    assert_eq!(Some("Decimals +1: 9 cells".to_owned()), last_message(&ws));
+    run_command(&mut ws, "undo");
+    assert_eq!("0.00%", fmt_of(&ws, 1, 1));
+    assert_eq!("General", fmt_of(&ws, 2, 2));
+}
+
+#[test]
+fn test_decimals_cmd_refusal_is_error_and_changes_nothing() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "format date");
+    script().char('v').chars("jj").char(':').chars("decimals +1").enter()
+        .run(&mut ws).expect("script");
+    assert_eq!(Some("Cannot change decimals of yyyy-mm-dd".to_owned()), last_message(&ws));
+    assert_eq!(super::MessageLevel::Error, ws.state.message.as_ref().unwrap().level);
+    assert_eq!("yyyy-mm-dd", fmt_of(&ws, 1, 1));
+    assert_eq!("General", fmt_of(&ws, 2, 1));
+}
+
+#[test]
+fn test_decimals_cmd_bad_argument_shows_usage() {
+    let mut ws = new_workspace();
+    run_command(&mut ws, "decimals 99");
+    assert_eq!(Some(&Modality::Dialog), ws.state.modality_stack.last());
+    assert!(popup_text(&ws).contains("Usage: decimals <+n|-n|n>"));
+    assert_eq!("General", fmt_of(&ws, 1, 1));
 }
